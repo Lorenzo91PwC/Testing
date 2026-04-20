@@ -1,0 +1,25 @@
+# Local configuration
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.uv/
+
+# Streamlit
+.streamlit/
+
+# Run outputs (customer data stays local, never in git)
+runs/*
+!runs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
