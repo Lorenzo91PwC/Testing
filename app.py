@@ -57,15 +57,36 @@ st.caption("Local Excel pipeline — files never leave this machine.")
 col_main, col_chat = st.columns([2, 1])
 
 with col_main:
-    st.subheader("1. Upload input file")
-    uploaded = st.file_uploader("Excel file", type=["xlsx", "xlsm"])
+    st.subheader("Input Sunrise")
+    uploaded = st.file_uploader(
+        "Excel files",
+        type=["xlsx", "xlsm"],
+        accept_multiple_files=True,
+        key="input_sunrise",
+    )
+
+    st.subheader("Input Astra")
+    uploaded_astra = st.file_uploader(
+        "Excel files",
+        type=["xlsx", "xlsm"],
+        accept_multiple_files=True,
+        key="input_astra",
+    )
 
     if uploaded and st.button("▶ Run pipeline", type="primary"):
         run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         run_dir = RUNS_DIR / run_id
-        run_dir.mkdir(parents=True)
-        input_path = run_dir / "input.xlsx"
-        input_path.write_bytes(uploaded.getvalue())
+        sunrise_dir = run_dir / "sunrise"
+        astra_dir = run_dir / "astra"
+        sunrise_dir.mkdir(parents=True)
+        astra_dir.mkdir(parents=True)
+
+        for f in uploaded:
+            (sunrise_dir / f.name).write_bytes(f.getvalue())
+        for f in uploaded_astra or []:
+            (astra_dir / f.name).write_bytes(f.getvalue())
+
+        input_path = sunrise_dir / uploaded[0].name
         st.session_state.run_id = run_id
         st.session_state.chat_history = []
 
