@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -57,7 +58,7 @@ st.caption("Local Excel pipeline — files never leave this machine.")
 col_main, col_chat = st.columns([2, 1])
 
 with col_main:
-    st.subheader("1. Upload input file")
+    st.subheader("1. Upload input file - Sunrise input")
     uploaded = st.file_uploader("Excel file", type=["xlsx", "xlsm"])
 
     if uploaded and st.button("▶ Run pipeline", type="primary"):
@@ -92,9 +93,27 @@ with col_main:
                 status.update(label=f"Failed: {e}", state="error")
                 st.exception(e)
 
+    # Browse & preview previously uploaded input files
+    st.subheader("2. Browse & preview input files")
+    input_files = sorted(RUNS_DIR.glob("*/input.xlsx"), reverse=True)
+    if not input_files:
+        st.info("No uploaded files yet. Upload one above to see it here.")
+    else:
+        labels = [f"{f.parent.name} — {f.name}" for f in input_files]
+        choice = st.selectbox("Pick an uploaded file", labels, key="preview_file")
+        selected = input_files[labels.index(choice)]
+        try:
+            xl = pd.ExcelFile(selected)
+            sheet = st.selectbox("Sheet", xl.sheet_names, key="preview_sheet")
+            df = xl.parse(sheet)
+            st.caption(f"{len(df)} rows × {len(df.columns)} columns")
+            st.dataframe(df, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not read `{selected.name}`: {e}")
+
     # Show files produced in the current run
     if st.session_state.run_id:
-        st.subheader("2. Run outputs")
+        st.subheader("3. Run outputs")
         run_dir = RUNS_DIR / st.session_state.run_id
         files = list_run_files(run_dir)
         if not files:
