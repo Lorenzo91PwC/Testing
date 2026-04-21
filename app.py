@@ -6,7 +6,7 @@ ad-hoc edits afterwards. All files stay on this machine.
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -58,7 +58,18 @@ st.caption("Local Excel pipeline — files never leave this machine.")
 col_main, col_chat = st.columns([2, 1])
 
 with col_main:
-    st.subheader("1. Upload input file - Sunrise input")
+    st.subheader("1. Analysis date")
+    analysis_date = st.date_input(
+        "📅 Date of analysis",
+        value=st.session_state.get("analysis_date", date.today()),
+        key="analysis_date",
+        help="Reference date used across this pipeline run.",
+    )
+    st.caption(f"Selected: **{analysis_date.isoformat()}**")
+
+    st.divider()
+
+    st.subheader("2. Upload input file - Sunrise input")
     uploaded = st.file_uploader("Excel file", type=["xlsx", "xlsm"])
 
     if uploaded and st.button("▶ Run pipeline", type="primary"):
@@ -94,7 +105,7 @@ with col_main:
                 st.exception(e)
 
     # Browse & preview previously uploaded input files
-    st.subheader("2. Browse & preview input files")
+    st.subheader("3. Browse & preview input files")
     input_files = sorted(RUNS_DIR.glob("*/input.xlsx"), reverse=True)
     if not input_files:
         st.info("No uploaded files yet. Upload one above to see it here.")
@@ -113,7 +124,7 @@ with col_main:
 
     # Show files produced in the current run
     if st.session_state.run_id:
-        st.subheader("3. Run outputs")
+        st.subheader("4. Run outputs")
         run_dir = RUNS_DIR / st.session_state.run_id
         files = list_run_files(run_dir)
         if not files:
