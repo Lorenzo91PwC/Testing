@@ -87,11 +87,26 @@ with col_main:
     )
     if uploaded:
         st.caption(f"{len(uploaded)} file(s) ready: " + ", ".join(f.name for f in uploaded))
+        if st.button("💾 Save uploaded files"):
+            run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            run_dir = RUNS_DIR / run_id
+            run_dir.mkdir(parents=True)
+            for f in uploaded:
+                (run_dir / f.name).write_bytes(f.getvalue())
+            st.session_state.run_id = run_id
+            st.session_state.chat_history = []
+            st.success(
+                f"Saved {len(uploaded)} file(s) to `runs/{run_id}/`."
+            )
 
     # Browse & preview previously uploaded input files
     st.subheader("3. Browse & preview input files")
     input_files = sorted(
-        (f for f in RUNS_DIR.glob("*/*.xlsx") if "_output" not in f.stem),
+        (
+            f
+            for f in [*RUNS_DIR.glob("*/*.xlsx"), *RUNS_DIR.glob("*/*.xlsm")]
+            if "_output" not in f.stem
+        ),
         reverse=True,
     )
     if not input_files:
@@ -116,16 +131,19 @@ with col_main:
 
     # Run deterministic elaborations on the uploaded files
     st.subheader("4. Run elaborations")
-    if not uploaded:
-        st.info("Upload one or more files above to enable elaborations.")
+    if not uploaded and st.session_state.run_id is None:
+        st.info("Upload files and save them above to enable elaborations.")
     elif st.button("▶ Run elaborations", type="primary"):
-        run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        run_dir = RUNS_DIR / run_id
-        run_dir.mkdir(parents=True)
-        for f in uploaded:
-            (run_dir / f.name).write_bytes(f.getvalue())
-        st.session_state.run_id = run_id
-        st.session_state.chat_history = []
+        if st.session_state.run_id is None:
+            run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            run_dir = RUNS_DIR / run_id
+            run_dir.mkdir(parents=True)
+            for f in uploaded:
+                (run_dir / f.name).write_bytes(f.getvalue())
+            st.session_state.run_id = run_id
+            st.session_state.chat_history = []
+        else:
+            run_dir = RUNS_DIR / st.session_state.run_id
 
         state: dict = {"analysis_date": analysis_date.isoformat()}
 
