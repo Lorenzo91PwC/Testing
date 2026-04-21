@@ -67,14 +67,48 @@ st.caption("Local Excel pipeline — files never leave this machine.")
 col_main, col_chat = st.columns([2, 1])
 
 with col_main:
-    st.subheader("1. Analysis date")
-    analysis_date = st.date_input(
-        "📅 Date of analysis",
-        value=st.session_state.get("analysis_date", date.today()),
-        key="analysis_date",
-        help="Reference date used across this pipeline run.",
+    st.subheader("1. Input dell'utente")
+
+    # Reporting period — analysis runs every semester
+    col_year, col_sem, _ = st.columns([1, 1, 3])
+    today = date.today()
+    with col_year:
+        year = st.selectbox(
+            "Year",
+            list(range(today.year - 2, today.year + 3)),
+            index=2,
+            key="analysis_year",
+        )
+    with col_sem:
+        semester = st.selectbox(
+            "Semester",
+            ["H1", "H2"],
+            index=0 if today.month <= 6 else 1,
+            key="analysis_semester",
+        )
+    analysis_date = (
+        date(year, 6, 30) if semester == "H1" else date(year, 12, 31)
     )
-    st.caption(f"Selected: **{analysis_date.isoformat()}**")
+    st.caption(
+        f"Reference period: **{semester} {year}** — closing date "
+        f"`{analysis_date.isoformat()}`"
+    )
+
+    st.markdown("**Groups of Contracts**")
+    goc_default = pd.DataFrame(
+        {"Entity": [""] * 5, "GoC Name": [""] * 5, "GoC ID": [""] * 5}
+    )
+    goc_df = st.data_editor(
+        goc_default,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="goc_table",
+        column_config={
+            "Entity": st.column_config.TextColumn(width="small"),
+            "GoC Name": st.column_config.TextColumn(width="large"),
+            "GoC ID": st.column_config.TextColumn(width="small"),
+        },
+    )
 
     st.divider()
 
