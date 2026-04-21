@@ -79,7 +79,14 @@ with col_main:
     st.divider()
 
     st.subheader("2. Upload input file - Sunrise input")
-    uploaded = st.file_uploader("Excel file", type=["xlsx", "xlsm"])
+    uploaded = st.file_uploader(
+        "Excel files",
+        type=["xlsx", "xlsm"],
+        accept_multiple_files=True,
+        help="You can upload multiple files — drag several at once or use the browse button.",
+    )
+    if uploaded:
+        st.caption(f"{len(uploaded)} file(s) ready: " + ", ".join(f.name for f in uploaded))
 
     # Browse & preview previously uploaded input files
     st.subheader("3. Browse & preview input files")
@@ -107,16 +114,16 @@ with col_main:
 
     st.divider()
 
-    # Run deterministic elaborations on the uploaded file
+    # Run deterministic elaborations on the uploaded files
     st.subheader("4. Run elaborations")
     if not uploaded:
-        st.info("Upload a file above to enable elaborations.")
+        st.info("Upload one or more files above to enable elaborations.")
     elif st.button("▶ Run elaborations", type="primary"):
         run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         run_dir = RUNS_DIR / run_id
         run_dir.mkdir(parents=True)
-        input_path = run_dir / uploaded.name
-        input_path.write_bytes(uploaded.getvalue())
+        for f in uploaded:
+            (run_dir / f.name).write_bytes(f.getvalue())
         st.session_state.run_id = run_id
         st.session_state.chat_history = []
 
