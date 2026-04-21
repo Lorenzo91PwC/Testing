@@ -90,9 +90,12 @@ with col_main:
     if not input_files:
         st.info("No uploaded files yet. Upload one above to see it here.")
     else:
-        labels = [f"{f.parent.name} — {f.name}" for f in input_files]
-        choice = st.selectbox("Pick an uploaded file", labels, key="preview_file")
-        selected = input_files[labels.index(choice)]
+        selected = st.selectbox(
+            "Pick an uploaded file",
+            input_files,
+            format_func=lambda p: p.name,
+            key="preview_file",
+        )
         try:
             xl = pd.ExcelFile(selected)
             sheet = st.selectbox("Sheet", xl.sheet_names, key="preview_sheet")
