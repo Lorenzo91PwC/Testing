@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from excel_pipeline.orchestrator import run_ad_hoc
 from excel_pipeline.skill import (
+    build_goc_year_summary,
     find_file_by_suffix,
     get_unique_column_values,
     list_run_files,
@@ -24,6 +25,7 @@ from excel_pipeline.skill import (
 CEDED_SUFFIX = "AAI_P&C_Ceded"
 CEDED_SHEET = "AAI_P&C_Ceded"
 CEDED_COLUMN = "G"
+CEDED_HNH_SHEET = "AAI_P&C_Ceded_H_NH"
 
 load_dotenv()
 
@@ -200,6 +202,16 @@ with col_main:
                 state["ceded_portfolio_codes"] = codes
                 st.write(f"✅ {len(codes)} unique values in {CEDED_SHEET}!{CEDED_COLUMN}")
 
+                status.update(label="Building per-GoC yearly summaries...")
+                goc_summaries = build_goc_year_summary(
+                    path=ceded_path,
+                    sheet=CEDED_HNH_SHEET,
+                )
+                state["goc_summaries"] = goc_summaries
+                st.write(
+                    f"✅ {len(goc_summaries)} GoC summaries from {CEDED_HNH_SHEET}"
+                )
+
                 (run_dir / "state.json").write_text(
                     json.dumps(state, indent=2, default=str), encoding="utf-8"
                 )
@@ -219,12 +231,29 @@ with col_main:
             if codes:
                 with st.expander(
                     f"Ceded portfolio codes — {len(codes)} unique values",
-                    expanded=True,
+                    expanded=False,
                 ):
                     st.dataframe(
                         pd.DataFrame({"code": codes}),
                         use_container_width=True,
                         height=300,
+                    )
+
+            goc_summaries = state_data.get("goc_summaries", {})
+            if goc_summaries:
+                with st.expander(
+                    f"GoC yearly summaries — {len(goc_summaries)} groups",
+                    expanded=True,
+                ):
+                    picked = st.selectbox(
+                        "Pick a GoC",
+                        sorted(goc_summaries.keys()),
+                        key="goc_preview",
+                    )
+                    st.dataframe(
+                        pd.DataFrame(goc_summaries[picked]),
+                        use_container_width=True,
+                        hide_index=True,
                     )
 
         files = list_run_files(run_dir)

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
+import pandas as pd
 from openpyxl.utils import column_index_from_string
 from openpyxl.workbook import Workbook
 
@@ -124,6 +125,67 @@ def get_unique_column_values(path: str, sheet: str, column: str) -> list[Any]:
     return sorted(values, key=str)
 
 
+def build_goc_year_summary(path: str, sheet: str) -> dict[str, list[dict[str, Any]]]:
+    """Aggregate the Ceded sheet by (GoC, year) and return per-GoC tables.
+
+    Expected input columns (by header, present in sheet `AAI_P&C_Ceded_H_NH`):
+    - `GoC`              — column AA, grouping key
+    - `anno`             — column AB, reporting year
+    - `Sinistri`         — column AD, summed and returned as "Paid Claims"
+    - `Riserve Sinistri` — column AE, summed and returned as "Claims Reserve"
+
+    Non-numeric values in the sum columns are coerced to 0. Rows with an
+    empty GoC are dropped. Output shape:
+
+        {
+          "<GoC>": [
+            {"year": 2017, "Paid Claims": 123.45, "Claims Reserve": 0.0},
+            ...
+          ],
+          ...
+        }
+    """
+    df = pd.read_excel(path, sheet_name=sheet)
+
+    required = ["GoC", "anno", "Sinistri", "Riserve Sinistri"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Missing columns {missing} in sheet '{sheet}'. "
+            f"Got: {list(df.columns)}"
+        )
+
+    df = df.dropna(subset=["GoC"])
+    df = df[df["GoC"].astype(str).str.strip() != ""]
+    df["Sinistri"] = pd.to_numeric(df["Sinistri"], errors="coerce").fillna(0)
+    df["Riserve Sinistri"] = pd.to_numeric(
+        df["Riserve Sinistri"], errors="coerce"
+    ).fillna(0)
+
+    grouped = (
+        df.groupby(["GoC", "anno"], dropna=False)[["Sinistri", "Riserve Sinistri"]]
+        .sum()
+        .reset_index()
+        .rename(
+            columns={
+                "anno": "year",
+                "Sinistri": "Paid Claims",
+                "Riserve Sinistri": "Claims Reserve",
+            }
+        )
+    )
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for goc in sorted(grouped["GoC"].unique(), key=str):
+        sub = (
+            grouped[grouped["GoC"] == goc]
+            .drop(columns=["GoC"])
+            .sort_values("year")
+        )
+        result[str(goc)] = sub.to_dict(orient="records")
+    return result
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================
@@ -223,6 +285,27 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["path", "sheet", "column"],
         },
     },
+    {
+        "name": "build_goc_year_summary",
+        "description": (
+            "Aggregate the AAI P&C Ceded H/NH sheet by (GoC, year). Returns "
+            "a mapping of GoC to a list of yearly totals with 'Paid Claims' "
+            "(sum of 'Sinistri', column AD) and 'Claims Reserve' (sum of "
+            "'Riserve Sinistri', column AE). Year comes from column AB "
+            "('anno'); grouping key is column AA ('GoC')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "sheet": {
+                    "type": "string",
+                    "description": "Usually 'AAI_P&C_Ceded_H_NH'.",
+                },
+            },
+            "required": ["path", "sheet"],
+        },
+    },
     # Add a schema entry for each domain-specific function above.
 ]
 
@@ -235,6 +318,7 @@ _DISPATCH: dict[str, Any] = {
     "preview_rows": preview_rows,
     "find_file_by_suffix": find_file_by_suffix,
     "get_unique_column_values": get_unique_column_values,
+    "build_goc_year_summary": build_goc_year_summary,
     # Add an entry for each domain-specific function above.
 }
 
