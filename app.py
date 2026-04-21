@@ -5,6 +5,7 @@ ad-hoc edits afterwards. All files stay on this machine.
 """
 from __future__ import annotations
 
+import json
 import os
 from datetime import date, datetime
 from pathlib import Path
@@ -13,8 +14,16 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from excel_pipeline.orchestrator import run_ad_hoc, run_phase
-from excel_pipeline.skill import list_run_files
+from excel_pipeline.orchestrator import run_ad_hoc
+from excel_pipeline.skill import (
+    find_file_by_suffix,
+    get_unique_column_values,
+    list_run_files,
+)
+
+CEDED_SUFFIX = "AAI_P&C_Ceded"
+CEDED_SHEET = "AAI_P&C_Ceded"
+CEDED_COLUMN = "G"
 
 load_dotenv()
 
@@ -72,41 +81,12 @@ with col_main:
     st.subheader("2. Upload input file - Sunrise input")
     uploaded = st.file_uploader("Excel file", type=["xlsx", "xlsm"])
 
-    if uploaded and st.button("▶ Run pipeline", type="primary"):
-        run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        run_dir = RUNS_DIR / run_id
-        run_dir.mkdir(parents=True)
-        input_path = run_dir / "input.xlsx"
-        input_path.write_bytes(uploaded.getvalue())
-        st.session_state.run_id = run_id
-        st.session_state.chat_history = []
-
-        with st.status("Running pipeline...", expanded=True) as status:
-            try:
-                status.update(label="Phase 1 in progress...")
-                phase1_out = run_phase(
-                    phase="phase1",
-                    input_path=input_path,
-                    run_dir=run_dir,
-                )
-                st.write(f"✅ Phase 1 → `{phase1_out.name}`")
-
-                status.update(label="Phase 2 in progress...")
-                phase2_out = run_phase(
-                    phase="phase2",
-                    input_path=phase1_out,
-                    run_dir=run_dir,
-                )
-                st.write(f"✅ Phase 2 → `{phase2_out.name}`")
-
-                status.update(label="Pipeline complete", state="complete")
-            except Exception as e:
-                status.update(label=f"Failed: {e}", state="error")
-                st.exception(e)
-
     # Browse & preview previously uploaded input files
     st.subheader("3. Browse & preview input files")
-    input_files = sorted(RUNS_DIR.glob("*/input.xlsx"), reverse=True)
+    input_files = sorted(
+        (f for f in RUNS_DIR.glob("*/*.xlsx") if "_output" not in f.stem),
+        reverse=True,
+    )
     if not input_files:
         st.info("No uploaded files yet. Upload one above to see it here.")
     else:
@@ -122,13 +102,72 @@ with col_main:
         except Exception as e:
             st.warning(f"Could not read `{selected.name}`: {e}")
 
-    # Show files produced in the current run
+    st.divider()
+
+    # Run deterministic elaborations on the uploaded file
+    st.subheader("4. Run elaborations")
+    if not uploaded:
+        st.info("Upload a file above to enable elaborations.")
+    elif st.button("▶ Run elaborations", type="primary"):
+        run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        run_dir = RUNS_DIR / run_id
+        run_dir.mkdir(parents=True)
+        input_path = run_dir / uploaded.name
+        input_path.write_bytes(uploaded.getvalue())
+        st.session_state.run_id = run_id
+        st.session_state.chat_history = []
+
+        state: dict = {"analysis_date": analysis_date.isoformat()}
+
+        with st.status("Running elaborations...", expanded=True) as status:
+            try:
+                status.update(label=f"Locating {CEDED_SUFFIX} file...")
+                ceded_path = find_file_by_suffix(str(run_dir), CEDED_SUFFIX)
+                if ceded_path is None:
+                    raise FileNotFoundError(
+                        f"No file ending in '{CEDED_SUFFIX}' found in the upload."
+                    )
+                st.write(f"✅ Found `{Path(ceded_path).name}`")
+
+                status.update(label="Extracting unique Ceded portfolio codes...")
+                codes = get_unique_column_values(
+                    path=ceded_path,
+                    sheet=CEDED_SHEET,
+                    column=CEDED_COLUMN,
+                )
+                state["ceded_portfolio_codes"] = codes
+                st.write(f"✅ {len(codes)} unique values in {CEDED_SHEET}!{CEDED_COLUMN}")
+
+                (run_dir / "state.json").write_text(
+                    json.dumps(state, indent=2, default=str), encoding="utf-8"
+                )
+                status.update(label="Elaborations complete", state="complete")
+            except Exception as e:
+                status.update(label=f"Failed: {e}", state="error")
+                st.exception(e)
+
+    # Show results and files produced in the current run
     if st.session_state.run_id:
-        st.subheader("4. Run outputs")
+        st.subheader("5. Run outputs")
         run_dir = RUNS_DIR / st.session_state.run_id
+        state_path = run_dir / "state.json"
+        if state_path.exists():
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            codes = state_data.get("ceded_portfolio_codes", [])
+            if codes:
+                with st.expander(
+                    f"Ceded portfolio codes — {len(codes)} unique values",
+                    expanded=True,
+                ):
+                    st.dataframe(
+                        pd.DataFrame({"code": codes}),
+                        use_container_width=True,
+                        height=300,
+                    )
+
         files = list_run_files(run_dir)
         if not files:
-            st.info("No output files yet.")
+            st.info("No output Excel files yet.")
         for f in files:
             st.download_button(
                 label=f"⬇ {f.name}",

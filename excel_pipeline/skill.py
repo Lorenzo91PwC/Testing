@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
+from openpyxl.utils import column_index_from_string
 from openpyxl.workbook import Workbook
 
 
@@ -84,6 +85,45 @@ def preview_rows(path: str, sheet: str, n: int = 5) -> dict[str, Any]:
     return {"sheet": sheet, "headers": headers, "rows": rows}
 
 
+def find_file_by_suffix(directory: str, suffix: str) -> str | None:
+    """Return the path of the .xlsx file in `directory` whose stem ends with
+    `suffix`, or None if no match is found.
+
+    Used to locate a specific input file independently of the date prefix in
+    its name (e.g. suffix "AAI_P&C_Ceded" matches "1.1_2025.12.31_AAI_P&C_Ceded.xlsx").
+    """
+    for f in Path(directory).glob("*.xlsx"):
+        if f.stem.endswith(suffix):
+            return str(f)
+    return None
+
+
+def get_unique_column_values(path: str, sheet: str, column: str) -> list[Any]:
+    """Return the sorted unique, non-empty values from a single column.
+
+    `column` may be either a column letter (e.g. "G") or a header name from
+    row 1. None and empty-string values are excluded. Values are sorted by
+    their string representation for stable output across heterogeneous types.
+    """
+    wb = load_workbook(path)
+    ws = wb[sheet]
+    try:
+        col_idx = column_index_from_string(column)
+    except ValueError:
+        headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+        if column not in headers:
+            raise ValueError(f"Column '{column}' not found. Headers: {headers}")
+        col_idx = headers.index(column) + 1
+
+    values: set[Any] = set()
+    for r in range(2, ws.max_row + 1):
+        v = ws.cell(row=r, column=col_idx).value
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            continue
+        values.add(v)
+    return sorted(values, key=str)
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================
@@ -146,6 +186,43 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["path", "sheet"],
         },
     },
+    {
+        "name": "find_file_by_suffix",
+        "description": (
+            "Find an .xlsx file in a directory whose stem (filename without "
+            "extension) ends with a given suffix. Returns the absolute path "
+            "or null. Use when a file has a variable date prefix but a stable "
+            "suffix (e.g. suffix 'AAI_P&C_Ceded')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "directory": {"type": "string"},
+                "suffix": {"type": "string"},
+            },
+            "required": ["directory", "suffix"],
+        },
+    },
+    {
+        "name": "get_unique_column_values",
+        "description": (
+            "Return the sorted unique, non-empty values from a single column "
+            "of a sheet. `column` can be either a column letter (e.g. 'G') "
+            "or a header name from row 1."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "sheet": {"type": "string"},
+                "column": {
+                    "type": "string",
+                    "description": "Column letter (e.g. 'G') or header name.",
+                },
+            },
+            "required": ["path", "sheet", "column"],
+        },
+    },
     # Add a schema entry for each domain-specific function above.
 ]
 
@@ -156,6 +233,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 _DISPATCH: dict[str, Any] = {
     "inspect_workbook": inspect_workbook,
     "preview_rows": preview_rows,
+    "find_file_by_suffix": find_file_by_suffix,
+    "get_unique_column_values": get_unique_column_values,
     # Add an entry for each domain-specific function above.
 }
 
