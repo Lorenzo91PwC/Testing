@@ -12,7 +12,7 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from excel_pipeline.orchestrator import run_ad_hoc, run_phase
+from excel_pipeline.pipeline import run_phase1
 from excel_pipeline.skill import list_run_files
 
 load_dotenv()
@@ -33,6 +33,8 @@ ENTITIES: list[tuple[int, str]] = [
     (19, "NOBIS"),
 ]
 
+HAS_API_KEY = bool(os.getenv("ANTHROPIC_API_KEY"))
+
 st.set_page_config(
     page_title="Excel Pipeline",
     page_icon="📊",
@@ -44,16 +46,6 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 st.session_state.setdefault("run_id", None)
 st.session_state.setdefault("chat_history", [])
-
-# ---------------------------------------------------------------------------
-# Guard: API key
-# ---------------------------------------------------------------------------
-if not os.getenv("ANTHROPIC_API_KEY"):
-    st.error(
-        "ANTHROPIC_API_KEY not found. Copy `.env.example` to `.env` "
-        "and add your key from https://console.anthropic.com"
-    )
-    st.stop()
 
 # ---------------------------------------------------------------------------
 # UI
@@ -116,15 +108,13 @@ with col_main:
         with st.status("Running pipeline...", expanded=True) as status:
             try:
                 status.update(label="Phase 1 in progress...")
-                phase1_out = run_phase(
-                    phase="phase1",
+                phase1_out = run_phase1(
                     input_paths=input_paths,
                     run_dir=run_dir,
                     entity_id=entity_id,
                     entity_name=entity_name,
                     year=int(year),
                     semester=int(semester),
-                    expected_output="MP_LoB.xlsx",
                 )
                 st.write(f"✅ Phase 1 → `{phase1_out.name}`")
 
@@ -151,9 +141,17 @@ with col_main:
 
 with col_chat:
     st.subheader("💬 Ad-hoc edits")
-    if st.session_state.run_id is None:
+    if not HAS_API_KEY:
+        st.info(
+            "Ad-hoc edits require an Anthropic API key. Add "
+            "`ANTHROPIC_API_KEY` to `.env` to enable this panel. The main "
+            "pipeline works without it."
+        )
+    elif st.session_state.run_id is None:
         st.info("Run the pipeline first, then ask for changes here.")
     else:
+        from excel_pipeline.orchestrator import run_ad_hoc
+
         st.caption(f"Editing run `{st.session_state.run_id}`")
 
         for msg in st.session_state.chat_history:

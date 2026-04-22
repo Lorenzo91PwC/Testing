@@ -2,38 +2,43 @@
 
 ## What this is
 A standalone local desktop app that runs multi-phase Excel transformations.
-Deployed per-laptop, pulls logic updates from this GitHub repo on launch,
-calls the Anthropic API directly from the user's machine. No server, no
-proxy — each user brings their own API key in a local `.env` file.
+Deployed per-laptop, pulls logic updates from this GitHub repo on launch.
+The main pipeline is **plain deterministic Python** — no server, no LLM
+calls. An optional ad-hoc chat panel uses the Anthropic API (requires a
+local `ANTHROPIC_API_KEY` in `.env`) but the core flow works without it.
 
-## Architecture (three layers)
-1. **Streamlit UI** (`app.py`) — file upload, run button, per-phase progress,
-   ad-hoc chat panel. Runs at `localhost:8501`.
-2. **Orchestrator** (`excel_pipeline/orchestrator.py`) — loads a subagent
-   prompt from `subagents/{phase}.md`, runs a tool-use loop with Claude
-   (model: `claude-sonnet-4-6`), terminates on `end_turn`.
+## Architecture
+1. **Streamlit UI** (`app.py`) — file upload, analysis parameters, run
+   button, run-outputs list, optional ad-hoc chat panel. Runs at
+   `localhost:8501`.
+2. **Pipeline** (`excel_pipeline/pipeline.py`) — plain Python functions
+   (e.g. `run_phase1`) that call skill functions in a fixed, deterministic
+   sequence. **This is the main flow; no API key needed.**
 3. **Skill** (`excel_pipeline/skill.py`) — plain Python functions that
-   read/write `.xlsx`. Every transformation lives here, with a matching
-   entry in `TOOL_DEFINITIONS` and `_DISPATCH`.
+   read/write `.xlsx`. Every Excel transformation lives here.
+
+### Optional Claude layer (ad-hoc chat only)
+`excel_pipeline/orchestrator.py` + `subagents/*.md` + `TOOL_DEFINITIONS` /
+`_DISPATCH` in `skill.py` exist only to power the **ad-hoc chat panel**.
+It runs a tool-use loop with Claude (model: `claude-sonnet-4-6`) so the
+user can request one-off changes in natural language after a run. Fully
+optional: the chat panel shows a disabled notice if `ANTHROPIC_API_KEY`
+is missing, and the main pipeline is unaffected.
 
 ## The discipline rule (non-negotiable)
-**Subagents decide which function to call and with what arguments.
-Skill functions do the Excel work.** The model never writes cell values
-directly, never emits openpyxl code as a string, never improvises logic
-that isn't in the skill. If the model wants to do something no skill
-function supports, the correct answer is "please add a function for this"
-— not freestyle.
+All Excel work lives in `skill.py` as pure Python functions with tests.
+`pipeline.py` orchestrates them deterministically. The optional ad-hoc
+agent picks them via tool-use. **Never** emit openpyxl/pandas code as a
+string or improvise logic outside the skill.
 
 Preserve this boundary when adding features.
 
-## Adding a new transformation — the four coupled edits
+## Adding a new transformation
 1. Typed Python function in `skill.py` with a docstring.
-2. Entry in `TOOL_DEFINITIONS` with a description that teaches Claude
-   *when* to use it (and, if relevant, when not to — e.g. idempotency).
-3. Entry in `_DISPATCH` mapping the tool name to the function.
-4. Mention of the tool in the relevant subagent prompt.
-
-Plus a `pytest` against a fixture workbook.
+2. `pytest` against a fixture workbook in `tests/`.
+3. Call it from `pipeline.py` in the appropriate phase (deterministic flow).
+4. *(Only if needed for ad-hoc chat)* add a `TOOL_DEFINITIONS` entry and
+   a `_DISPATCH` entry, and mention it in the relevant subagent prompt.
 
 ## Run commands
 - App: `uv run streamlit run app.py`
@@ -45,12 +50,14 @@ Plus a `pytest` against a fixture workbook.
 ```
 app.py                         Streamlit entry point
 excel_pipeline/
-  orchestrator.py              subagent runner + tool-use loop
+  pipeline.py                  deterministic Python flow (main pipeline)
   skill.py                     Excel operations (all transformations here)
+  orchestrator.py              OPTIONAL Claude runner — ad-hoc chat only
   subagents/
-    phase1.md                  Phase 1 system prompt
-    phase2.md                  Phase 2 system prompt
-    ad_hoc.md                  Ad-hoc edit system prompt
+    phase1.md                  legacy / reference subagent prompt
+    phase2.md                  legacy / reference subagent prompt
+    ad_hoc.md                  ad-hoc chat system prompt
+tests/                         pytest fixtures + tests
 runs/                          per-run input/output folders (gitignored)
 launch.bat / launch.sh         installer + updater + app launcher
 pyproject.toml                 uv-managed deps
@@ -60,14 +67,13 @@ pyproject.toml                 uv-managed deps
 - Committing anything to `runs/` (user data — `.gitignore` handles this
   but don't fight it).
 - Committing `.env` or any real API key.
-- Adding logic to subagent prompts that belongs in skill functions.
-- Having the model call raw openpyxl or pandas. If you see tool names like
-  `run_python` or `execute_code`, something has gone wrong.
-- Making transformations non-idempotent without a warning in both the
-  docstring and the tool description.
+- Putting Excel logic in `pipeline.py`, subagent prompts, or anywhere other
+  than `skill.py`. Pipelines chain skill calls; skills do the work.
+- Having the ad-hoc agent call raw openpyxl or pandas. If you see tool
+  names like `run_python` or `execute_code`, something has gone wrong.
+- Making transformations non-idempotent without a warning in the docstring.
 
-## Model choice
-`claude-sonnet-4-6` by default. Swap to `claude-opus-4-7` in
-`orchestrator.py:MODEL` if a specific phase needs more reasoning (complex
-multi-sheet consolidation, ambiguous ad-hoc requests). Haiku is usually
-too weak for tool-use orchestration here.
+## Model choice (ad-hoc only)
+`claude-sonnet-4-6` by default in `orchestrator.py:MODEL`. Swap to
+`claude-opus-4-7` only if ad-hoc requests routinely need more reasoning.
+Haiku is usually too weak for tool-use orchestration.
