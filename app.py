@@ -1,4 +1,4 @@
-"""Excel Pipeline — Streamlit entry point.
+"""Sunrise Input Builder — Streamlit entry point.
 
 A local web UI for running the Excel transformation pipeline and making
 ad-hoc edits afterwards. All files stay on this machine.
@@ -36,7 +36,7 @@ ENTITIES: list[tuple[int, str]] = [
 HAS_API_KEY = bool(os.getenv("ANTHROPIC_API_KEY"))
 
 st.set_page_config(
-    page_title="Excel Pipeline",
+    page_title="Sunrise Input Builder",
     page_icon="📊",
     layout="wide",
 )
@@ -50,8 +50,8 @@ st.session_state.setdefault("chat_history", [])
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
-st.title("📊 Excel Pipeline")
-st.caption("Local Excel pipeline — files never leave this machine.")
+st.title("📊 Sunrise Input Builder")
+st.caption("Local pipeline that prepares Sunrise input files — data never leaves this machine.")
 
 col_main, col_chat = st.columns([2, 1])
 
