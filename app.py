@@ -64,8 +64,30 @@ st.caption("Local Excel pipeline — files never leave this machine.")
 col_main, col_chat = st.columns([2, 1])
 
 with col_main:
-    st.subheader("1. Upload input file")
-    uploaded = st.file_uploader("Excel file", type=["xlsx", "xlsm"])
+    st.subheader("1. Upload input files")
+    uploaded = st.file_uploader(
+        "Excel files",
+        type=["xlsx", "xlsm"],
+        accept_multiple_files=True,
+    )
+
+    st.subheader("2. Analysis parameters")
+    col_year, col_sem = st.columns(2)
+    with col_year:
+        year = st.number_input(
+            "Year",
+            min_value=2000,
+            max_value=2100,
+            value=datetime.now().year,
+            step=1,
+        )
+    with col_sem:
+        semester = st.radio(
+            "Semester",
+            options=[1, 2],
+            horizontal=True,
+            format_func=lambda s: f"H{s}",
+        )
     entity = st.selectbox(
         "Entity to analyze",
         options=ENTITIES,
@@ -82,8 +104,11 @@ with col_main:
         run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         run_dir = RUNS_DIR / run_id
         run_dir.mkdir(parents=True)
-        input_path = run_dir / "input.xlsx"
-        input_path.write_bytes(uploaded.getvalue())
+        input_paths: list[Path] = []
+        for f in uploaded:
+            p = run_dir / f.name
+            p.write_bytes(f.getvalue())
+            input_paths.append(p)
         st.session_state.run_id = run_id
         st.session_state.chat_history = []
 
@@ -92,20 +117,24 @@ with col_main:
                 status.update(label="Phase 1 in progress...")
                 phase1_out = run_phase(
                     phase="phase1",
-                    input_path=input_path,
+                    input_paths=input_paths,
                     run_dir=run_dir,
                     entity_id=entity_id,
                     entity_name=entity_name,
+                    year=int(year),
+                    semester=int(semester),
                 )
                 st.write(f"✅ Phase 1 → `{phase1_out.name}`")
 
                 status.update(label="Phase 2 in progress...")
                 phase2_out = run_phase(
                     phase="phase2",
-                    input_path=phase1_out,
+                    input_paths=[phase1_out],
                     run_dir=run_dir,
                     entity_id=entity_id,
                     entity_name=entity_name,
+                    year=int(year),
+                    semester=int(semester),
                 )
                 st.write(f"✅ Phase 2 → `{phase2_out.name}`")
 
@@ -116,7 +145,7 @@ with col_main:
 
     # Show files produced in the current run
     if st.session_state.run_id:
-        st.subheader("2. Run outputs")
+        st.subheader("3. Run outputs")
         run_dir = RUNS_DIR / st.session_state.run_id
         files = list_run_files(run_dir)
         if not files:

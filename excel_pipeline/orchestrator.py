@@ -100,26 +100,30 @@ def _run_tool_loop(system_prompt: str, user_message: str) -> str:
 # ---------------------------------------------------------------------------
 def run_phase(
     phase: str,
-    input_path: Path,
+    input_paths: list[Path],
     run_dir: Path,
     entity_id: int | None = None,
     entity_name: str | None = None,
+    year: int | None = None,
+    semester: int | None = None,
 ) -> Path:
     """Run a phase subagent and return the path to its output file.
 
     The subagent is expected to write `{phase}_output.xlsx` in the run dir.
     """
     system_prompt = _load_prompt(phase)
-    entity_line = (
-        f"Entity: {entity_id} — {entity_name}\n"
-        if entity_id is not None and entity_name is not None
-        else ""
-    )
+    inputs_block = "\n".join(f"  - {p}" for p in input_paths)
+    context_lines = []
+    if entity_id is not None and entity_name is not None:
+        context_lines.append(f"Entity: {entity_id} — {entity_name}")
+    if year is not None and semester is not None:
+        context_lines.append(f"Period: H{semester} {year}")
+    context_block = ("\n".join(context_lines) + "\n") if context_lines else ""
     user_message = (
-        f"Input file: {input_path}\n"
+        f"Input files:\n{inputs_block}\n"
         f"Run directory: {run_dir}\n"
         f"Phase: {phase}\n"
-        f"{entity_line}"
+        f"{context_block}"
         f"\n"
         f"Apply the transformations described in your instructions, then "
         f"save the output as {phase}_output.xlsx in the run directory."
