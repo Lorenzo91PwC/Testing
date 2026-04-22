@@ -98,7 +98,10 @@ def extract_unique_goc_names(
     idempotent. Order follows first occurrence; whitespace is stripped
     and empty cells are skipped.
     """
-    wb = load_workbook(path)
+    # data_only=True returns the cached computed value for formula cells
+    # rather than the formula string — required for the Ceded file whose
+    # column AA is typically populated by lookup formulas.
+    wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb[sheet]
     col_idx = column_index_from_string(column)
     seen: list[str] = []
