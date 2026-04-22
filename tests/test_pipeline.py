@@ -14,8 +14,9 @@ def _build_ceded_fixture(path: Path) -> None:
     ws = wb.active
     ws.title = "AAI_P&C_Ceded_H_NH"
     ws.cell(row=1, column=27, value="GoC")
+    ws.cell(row=2, column=27, value="Line of Business")
     for i, v in enumerate(
-        ["Motor", "Property", "Motor", "Liability"], start=2,
+        ["Motor", "Property", "Motor", "Liability"], start=3,
     ):
         ws.cell(row=i, column=27, value=v)
     wb.save(path)

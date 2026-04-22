@@ -9,11 +9,16 @@ from excel_pipeline.skill import create_mp_lob, extract_unique_goc_names
 
 
 def _build_ceded_fixture(path: Path) -> None:
-    """Create a minimal workbook shaped like the AAI_P&C_Ceded input file."""
+    """Create a minimal workbook shaped like the AAI_P&C_Ceded input file.
+
+    Matches the real file: rows 1-2 are header / sub-header, data from
+    row 3 onwards.
+    """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "AAI_P&C_Ceded_H_NH"
     ws.cell(row=1, column=27, value="GoC")  # column AA = 27
+    ws.cell(row=2, column=27, value="Line of Business")  # sub-header
     values = [
         "Motor",
         "Property",
@@ -24,7 +29,7 @@ def _build_ceded_fixture(path: Path) -> None:
         "",
         "Motor",
     ]
-    for i, v in enumerate(values, start=2):
+    for i, v in enumerate(values, start=3):
         ws.cell(row=i, column=27, value=v)
     wb.save(path)
 
@@ -41,7 +46,7 @@ def test_extract_unique_goc_names(tmp_path: Path) -> None:
     assert result["count"] == 3
 
 
-def test_extract_unique_goc_names_custom_column(tmp_path: Path) -> None:
+def test_extract_unique_goc_names_custom_column_and_start_row(tmp_path: Path) -> None:
     fixture = tmp_path / "custom.xlsx"
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -51,7 +56,7 @@ def test_extract_unique_goc_names_custom_column(tmp_path: Path) -> None:
         ws.cell(row=i, column=2, value=v)
     wb.save(fixture)
 
-    result = extract_unique_goc_names(str(fixture), column="B")
+    result = extract_unique_goc_names(str(fixture), column="B", start_row=2)
 
     assert result["values"] == ["A", "B"]
 

@@ -89,14 +89,16 @@ def extract_unique_goc_names(
     path: str,
     sheet: str = "AAI_P&C_Ceded_H_NH",
     column: str = "AA",
+    start_row: int = 3,
 ) -> dict[str, Any]:
     """Return the unique non-empty GoC names from a column of a Ceded workbook.
 
     Intended for the input file whose name ends with the fixed suffix
     ``AAI_P&C_Ceded`` (e.g. ``1.1_2025.12.31_AAI_P&C_Ceded.xlsx``). The
-    default sheet and column match that file's layout. Read-only and
-    idempotent. Order follows first occurrence; whitespace is stripped
-    and empty cells are skipped.
+    default sheet, column and ``start_row`` (3, since rows 1-2 are header
+    / sub-header) match that file's layout. Read-only and idempotent.
+    Order follows first occurrence; whitespace is stripped and empty
+    cells are skipped.
     """
     # data_only=True returns the cached computed value for formula cells
     # rather than the formula string — required for the Ceded file whose
@@ -106,7 +108,7 @@ def extract_unique_goc_names(
     col_idx = column_index_from_string(column)
     seen: list[str] = []
     seen_set: set[str] = set()
-    for r in range(2, ws.max_row + 1):
+    for r in range(start_row, ws.max_row + 1):
         v = ws.cell(row=r, column=col_idx).value
         if v is None:
             continue
@@ -239,6 +241,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "type": "string",
                     "default": "AA",
                     "description": "Excel column letter to read GoC names from.",
+                },
+                "start_row": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "First data row (rows 1-2 are header).",
                 },
             },
             "required": ["path"],
