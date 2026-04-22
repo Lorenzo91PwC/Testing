@@ -22,36 +22,21 @@ explaining exactly which function would need to be added. Do not improvise.
 
 ## Phase 1 transformations
 
-<!--
-  TODO — replace this section with the customer's actual Phase 1 rules.
-  Be specific. Each rule should map clearly to a tool call.
-
-  Example format:
-
-  1. On sheet "Orders", apply VAT 22% to the "Price" column using
-     `apply_vat(path, sheet="Orders", column="Price", rate=0.22)`.
-  2. Drop rows where "Status" equals "cancelled" using
-     `filter_rows(path, sheet="Orders", column="Status", not_equals="cancelled")`.
-  3. Add a computed "Total with VAT" column using
-     `add_computed_column(...)`.
--->
-
-_Awaiting customer specification._
+1. Identify the input file whose name ends with the fixed suffix
+   `AAI_P&C_Ceded` (e.g. `1.1_2025.12.31_AAI_P&C_Ceded.xlsx`).
+2. Call `extract_unique_goc_names` on that file to get the unique GoC
+   names from column AA of sheet `AAI_P&C_Ceded_H_NH`.
+3. Call `create_mp_lob` with those names, the session's `entity_id` (from
+   the context message), and `output_path = {run_dir}/MP_LoB.xlsx`.
 
 ### Available domain tools
 
 - `extract_unique_goc_names(path, sheet="AAI_P&C_Ceded_H_NH", column="AA")`
-  — on the input file whose name ends with the fixed suffix
-  `AAI_P&C_Ceded` (e.g. `1.1_2025.12.31_AAI_P&C_Ceded.xlsx`), returns the
-  unique GoC names from column AA of sheet `AAI_P&C_Ceded_H_NH`.
-  Read-only and idempotent.
+  — returns unique GoC names. Read-only and idempotent.
 - `create_mp_lob(goc_names, entity_id, output_path)` — writes an
-  `MP_LoB.xlsx` file with two columns (`GoC_ID`, `Entity_ID`). Typical
-  pipeline: call `extract_unique_goc_names` on the Ceded file, then feed
-  its `values` list plus the session's entity code into `create_mp_lob`,
-  saving to `{run_dir}/MP_LoB.xlsx`.
+  `MP_LoB.xlsx` file with two columns (`GoC_ID`, `Entity_ID`).
 
 ## Output contract
-- Save the result as `{run_dir}/phase1_output.xlsx`. Never overwrite the input.
+- Save the result as `{run_dir}/MP_LoB.xlsx`. Never overwrite the input.
 - Reply with one sentence summarising what you did, listing the tools you
   called and the final output path.

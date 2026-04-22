@@ -103,10 +103,11 @@ with col_main:
         entity_id, entity_name = entity
         run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         run_dir = RUNS_DIR / run_id
-        run_dir.mkdir(parents=True)
+        inputs_dir = run_dir / "inputs"
+        inputs_dir.mkdir(parents=True)
         input_paths: list[Path] = []
         for f in uploaded:
-            p = run_dir / f.name
+            p = inputs_dir / f.name
             p.write_bytes(f.getvalue())
             input_paths.append(p)
         st.session_state.run_id = run_id
@@ -123,20 +124,9 @@ with col_main:
                     entity_name=entity_name,
                     year=int(year),
                     semester=int(semester),
+                    expected_output="MP_LoB.xlsx",
                 )
                 st.write(f"✅ Phase 1 → `{phase1_out.name}`")
-
-                status.update(label="Phase 2 in progress...")
-                phase2_out = run_phase(
-                    phase="phase2",
-                    input_paths=[phase1_out],
-                    run_dir=run_dir,
-                    entity_id=entity_id,
-                    entity_name=entity_name,
-                    year=int(year),
-                    semester=int(semester),
-                )
-                st.write(f"✅ Phase 2 → `{phase2_out.name}`")
 
                 status.update(label="Pipeline complete", state="complete")
             except Exception as e:

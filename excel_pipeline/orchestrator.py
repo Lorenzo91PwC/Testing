@@ -106,12 +106,16 @@ def run_phase(
     entity_name: str | None = None,
     year: int | None = None,
     semester: int | None = None,
+    expected_output: str | None = None,
 ) -> Path:
     """Run a phase subagent and return the path to its output file.
 
-    The subagent is expected to write `{phase}_output.xlsx` in the run dir.
+    ``expected_output`` is the filename the subagent must produce in the
+    run dir (defaults to ``{phase}_output.xlsx``). The orchestrator verifies
+    it exists and returns its path.
     """
     system_prompt = _load_prompt(phase)
+    output_name = expected_output or f"{phase}_output.xlsx"
     inputs_block = "\n".join(f"  - {p}" for p in input_paths)
     context_lines = []
     if entity_id is not None and entity_name is not None:
@@ -126,11 +130,11 @@ def run_phase(
         f"{context_block}"
         f"\n"
         f"Apply the transformations described in your instructions, then "
-        f"save the output as {phase}_output.xlsx in the run directory."
+        f"save the output as {output_name} in the run directory."
     )
     _run_tool_loop(system_prompt, user_message)
 
-    output = run_dir / f"{phase}_output.xlsx"
+    output = run_dir / output_name
     if not output.exists():
         raise RuntimeError(
             f"{phase} did not produce the expected output at {output}. "
