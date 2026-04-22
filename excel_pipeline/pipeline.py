@@ -15,8 +15,10 @@ from pathlib import Path
 from .skill import (
     create_mp_lob,
     create_mp_observation_year,
+    create_payment_pattern,
     create_risk_adjustment,
     extract_unique_goc_names,
+    lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
 )
 
@@ -48,19 +50,21 @@ def run_phase1(
     year: int,
     semester: int,
 ) -> list[Path]:
-    """Phase 1: Ceded + Payment_Patterns -> MP_LoB, MP_ObservationYear, Risk_Adjustment.
+    """Phase 1: Ceded + Payment_Patterns -> four output workbooks.
 
     Picks the Ceded input file and extracts the unique GoC names from
     column AA of sheet ``AAI_P&C_Ceded_H_NH``. Picks the
-    Payment_Patterns_&_Risk_Adjustments file and reads the Opening/Closing
-    Risk Adjustment values for each GoC (sheet ``ra_AAI_REINS``, year
-    columns selected by ``year`` and ``semester``). Writes:
+    Payment_Patterns_&_Risk_Adjustments file and reads Risk Adjustment
+    and Payment Pattern values (sheets ``ra_AAI_REINS`` and
+    ``pp_AAI_REINS``) using ``year`` and ``semester``. Writes:
 
     - ``{run_dir}/MP_LoB.xlsx`` — columns ``GoC_ID``, ``Entity_ID``.
     - ``{run_dir}/MP_ObservationYear.xlsx`` — two rows per GoC
       (``@Opening`` with ``year-1`` and ``@Closing`` with ``year``).
     - ``{run_dir}/Risk_Adjustment.xlsx`` — two rows per GoC with the
       Opening/Closing Risk Adjustment values.
+    - ``{run_dir}/Payment_pattern.xlsx`` — 25 columns (``GoC``, ``Year``,
+      ``0`` .. ``22``), two rows per GoC (``year`` and ``year-1``).
 
     Returns the list of output paths in the order they were produced.
     ``entity_name`` is accepted for symmetry with the UI call site but is
@@ -99,4 +103,16 @@ def run_phase1(
         output_path=str(ra_path),
     )
 
-    return [mp_lob_path, mp_obs_path, ra_path]
+    pp_rows = lookup_payment_pattern_values(
+        path=str(pp_path),
+        goc_names=goc_names,
+        year=year,
+        semester=semester,
+    )
+    payment_pattern_path = run_dir / "Payment_pattern.xlsx"
+    create_payment_pattern(
+        rows=pp_rows,
+        output_path=str(payment_pattern_path),
+    )
+
+    return [mp_lob_path, mp_obs_path, ra_path, payment_pattern_path]

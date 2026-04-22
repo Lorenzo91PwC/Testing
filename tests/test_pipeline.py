@@ -23,21 +23,45 @@ def _build_ceded_fixture(path: Path) -> None:
 
 
 def _build_payment_patterns_fixture(path: Path) -> None:
+    """Fixture with both the ra_AAI_REINS and pp_AAI_REINS sheets."""
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "ra_AAI_REINS"
-    ws.cell(row=1, column=7, value="GoC")
+
+    # --- ra_AAI_REINS ---
+    ra = wb.active
+    ra.title = "ra_AAI_REINS"
+    ra.cell(row=1, column=7, value="GoC")
     for i, h in enumerate(["HY_2024", "FY_2024", "HY_2025", "FY_2025"], start=8):
-        ws.cell(row=1, column=i, value=h)
-    data = [
+        ra.cell(row=1, column=i, value=h)
+    ra_data = [
         ("Motor", 100, 110, 120, 130),
         ("Property", 200, 210, 220, 230),
         ("Liability", 300, 310, 320, 330),
     ]
-    for r, (goc, *vals) in enumerate(data, start=2):
-        ws.cell(row=r, column=7, value=goc)
+    for r, (goc, *vals) in enumerate(ra_data, start=2):
+        ra.cell(row=r, column=7, value=goc)
         for j, v in enumerate(vals):
-            ws.cell(row=r, column=8 + j, value=v)
+            ra.cell(row=r, column=8 + j, value=v)
+
+    # --- pp_AAI_REINS ---
+    pp = wb.create_sheet("pp_AAI_REINS")
+    pp.cell(row=1, column=3, value="GoC")
+    pp.cell(row=1, column=4, value="Year")
+    for i in range(23):
+        pp.cell(row=1, column=5 + i, value=str(i))
+    pp_data = [
+        ("Motor", "FY2024", 1000),
+        ("Motor", "FY2025", 2000),
+        ("Property", "FY2024", 5000),
+        ("Property", "FY2025", 6000),
+        ("Liability", "FY2024", 7000),
+        ("Liability", "FY2025", 8000),
+    ]
+    for r, (goc, yr, seed) in enumerate(pp_data, start=2):
+        pp.cell(row=r, column=3, value=goc)
+        pp.cell(row=r, column=4, value=yr)
+        for i in range(23):
+            pp.cell(row=r, column=5 + i, value=seed + i)
+
     wb.save(path)
 
 
@@ -62,6 +86,7 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         tmp_path / "MP_LoB.xlsx",
         tmp_path / "MP_ObservationYear.xlsx",
         tmp_path / "Risk_Adjustment.xlsx",
+        tmp_path / "Payment_pattern.xlsx",
     ]
     for p in outputs:
         assert p.exists()
@@ -100,6 +125,20 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         ("Liability@Opening", 310),
         ("Liability@Closing", 330),
     ]
+
+    pp = list(
+        openpyxl.load_workbook(outputs[3])["Payment_pattern"].iter_rows(values_only=True)
+    )
+    expected_headers = ("GoC", "Year") + tuple(str(i) for i in range(23))
+    assert pp[0] == expected_headers
+    # For each GoC, reference year first then year-1.
+    # seed: Motor FY2025=2000, FY2024=1000; Property FY2025=6000, FY2024=5000; Liability FY2025=8000, FY2024=7000.
+    assert pp[1] == ("Motor", 2025) + tuple(2000 + i for i in range(23))
+    assert pp[2] == ("Motor", 2024) + tuple(1000 + i for i in range(23))
+    assert pp[3] == ("Property", 2025) + tuple(6000 + i for i in range(23))
+    assert pp[4] == ("Property", 2024) + tuple(5000 + i for i in range(23))
+    assert pp[5] == ("Liability", 2025) + tuple(8000 + i for i in range(23))
+    assert pp[6] == ("Liability", 2024) + tuple(7000 + i for i in range(23))
 
 
 def test_run_phase1_missing_ceded(tmp_path: Path) -> None:

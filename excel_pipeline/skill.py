@@ -300,6 +300,120 @@ def create_risk_adjustment(
     }
 
 
+PAYMENT_PATTERN_COLUMN_COUNT = 23  # data columns '0' through '22'
+
+
+def lookup_payment_pattern_values(
+    path: str,
+    goc_names: list[str],
+    year: int,
+    semester: int,
+    sheet: str = "pp_AAI_REINS",
+    goc_column: str = "C",
+    year_column: str = "D",
+    header_row: int = 1,
+) -> list[dict[str, Any]]:
+    """Look up Payment Pattern rows from a Payment_Patterns workbook.
+
+    For each GoC the function emits two rows — one with the reference
+    ``year`` and one with ``year - 1``. The source sheet layout is:
+
+    - ``goc_column`` (default C): the GoC name.
+    - ``year_column`` (default D): the period label in the format
+      ``{prefix}{year}`` (e.g. ``FY2025``, ``HY2024``) — **no underscore**.
+    - 23 data columns after ``year_column`` whose header-row values are
+      ``'0'`` .. ``'22'`` (string or integer; leading/trailing
+      whitespace is tolerated).
+
+    The prefix follows the semester: H1 -> ``HY``, H2 -> ``FY``. Opens
+    with ``data_only=True``. Missing (GoC, year) combinations produce a
+    row of 23 ``None`` values. Raises ``KeyError`` if fewer than 23 data
+    columns can be matched in the header row.
+
+    Returns an ordered list of ``{"goc": str, "year": int, "values":
+    list}`` dicts.
+    """
+    if semester not in (1, 2):
+        raise ValueError(f"semester must be 1 or 2, got {semester}")
+    prefix = "HY" if semester == 1 else "FY"
+
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb[sheet]
+    goc_col_idx = column_index_from_string(goc_column)
+    year_col_idx = column_index_from_string(year_column)
+
+    expected_headers = [str(i) for i in range(PAYMENT_PATTERN_COLUMN_COUNT)]
+    data_cols: list[int] = []
+    for c in range(year_col_idx + 1, ws.max_column + 1):
+        h = ws.cell(row=header_row, column=c).value
+        if h is None:
+            continue
+        if str(h).strip() in expected_headers:
+            data_cols.append(c)
+            if len(data_cols) == PAYMENT_PATTERN_COLUMN_COUNT:
+                break
+    if len(data_cols) != PAYMENT_PATTERN_COLUMN_COUNT:
+        raise KeyError(
+            f"Expected {PAYMENT_PATTERN_COLUMN_COUNT} data columns named "
+            f"'0'..'22' after column '{year_column}' on sheet '{sheet}'; "
+            f"found {len(data_cols)}."
+        )
+
+    key_to_row: dict[tuple[str, str], int] = {}
+    for r in range(header_row + 1, ws.max_row + 1):
+        goc_v = ws.cell(row=r, column=goc_col_idx).value
+        year_v = ws.cell(row=r, column=year_col_idx).value
+        if goc_v is None or year_v is None:
+            continue
+        goc_key = str(goc_v).strip()
+        year_key = str(year_v).strip()
+        if goc_key and year_key:
+            key_to_row.setdefault((goc_key, year_key), r)
+
+    result: list[dict[str, Any]] = []
+    for goc in goc_names:
+        for y in (year, year - 1):
+            label = f"{prefix}{y}"
+            row_num = key_to_row.get((goc, label))
+            if row_num is None:
+                values: list[Any] = [None] * PAYMENT_PATTERN_COLUMN_COUNT
+            else:
+                values = [
+                    ws.cell(row=row_num, column=c).value for c in data_cols
+                ]
+            result.append({"goc": goc, "year": y, "values": values})
+    return result
+
+
+def create_payment_pattern(
+    rows: list[dict[str, Any]],
+    output_path: str,
+) -> dict[str, Any]:
+    """Create a ``Payment_pattern`` workbook with 25 columns.
+
+    Columns: ``GoC``, ``Year`` and then ``'0'`` through ``'22'``. ``rows``
+    is typically the list returned by ``lookup_payment_pattern_values``.
+    Missing values produce empty cells. Overwrites the output file.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Payment_pattern"
+    headers = ["GoC", "Year"] + [str(i) for i in range(PAYMENT_PATTERN_COLUMN_COUNT)]
+    for col, h in enumerate(headers, start=1):
+        ws.cell(row=1, column=col, value=h)
+    for r, row in enumerate(rows, start=2):
+        ws.cell(row=r, column=1, value=row["goc"])
+        ws.cell(row=r, column=2, value=row["year"])
+        for c, v in enumerate(row.get("values", []), start=3):
+            ws.cell(row=r, column=c, value=v)
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows": len(rows),
+        "columns": headers,
+    }
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================
@@ -513,6 +627,60 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["goc_names", "values", "output_path"],
         },
     },
+    {
+        "name": "lookup_payment_pattern_values",
+        "description": (
+            "Read Payment Pattern rows from the "
+            "Payment_Patterns_&_Risk_Adjustments workbook. Emits two rows "
+            "per GoC — one for `year` and one for `year - 1`. The source "
+            "sheet (default 'pp_AAI_REINS') has GoC in column C, period "
+            "label in column D (format '{prefix}{year}', e.g. 'FY2025', "
+            "no underscore), and 23 data columns named '0'..'22' after "
+            "column D. Prefix follows semester: H1 -> 'HY', H2 -> 'FY'. "
+            "Read-only and idempotent."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "goc_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "year": {"type": "integer"},
+                "semester": {"type": "integer", "enum": [1, 2]},
+                "sheet": {"type": "string", "default": "pp_AAI_REINS"},
+                "goc_column": {"type": "string", "default": "C"},
+                "year_column": {"type": "string", "default": "D"},
+                "header_row": {"type": "integer", "default": 1},
+            },
+            "required": ["path", "goc_names", "year", "semester"],
+        },
+    },
+    {
+        "name": "create_payment_pattern",
+        "description": (
+            "Create a 'Payment_pattern' workbook with 25 columns: GoC, "
+            "Year, and '0' through '22'. `rows` is the list returned by "
+            "`lookup_payment_pattern_values`. Missing values become "
+            "empty cells. Overwrites the output file."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "List of {'goc': str, 'year': int, 'values': [23 values]} "
+                        "dicts, typically from lookup_payment_pattern_values."
+                    ),
+                },
+                "output_path": {"type": "string"},
+            },
+            "required": ["rows", "output_path"],
+        },
+    },
     # Add a schema entry for each domain-specific function above.
 ]
 
@@ -528,6 +696,8 @@ _DISPATCH: dict[str, Any] = {
     "create_mp_observation_year": create_mp_observation_year,
     "lookup_risk_adjustment_values": lookup_risk_adjustment_values,
     "create_risk_adjustment": create_risk_adjustment,
+    "lookup_payment_pattern_values": lookup_payment_pattern_values,
+    "create_payment_pattern": create_payment_pattern,
     # Add an entry for each domain-specific function above.
 }
 

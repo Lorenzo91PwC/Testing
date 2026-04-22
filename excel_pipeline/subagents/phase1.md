@@ -37,6 +37,10 @@ explaining exactly which function would need to be added. Do not improvise.
    names, and the session's `year` and `semester`.
 7. Call `create_risk_adjustment` with the GoC names, the values from
    step 6, and `output_path = {run_dir}/Risk_Adjustment.xlsx`.
+8. Call `lookup_payment_pattern_values` with the Payment_Patterns path,
+   the GoC names, and the session's `year` and `semester`.
+9. Call `create_payment_pattern` with the rows from step 8 and
+   `output_path = {run_dir}/Payment_pattern.xlsx`.
 
 ### Available domain tools
 
@@ -52,10 +56,16 @@ explaining exactly which function would need to be added. Do not improvise.
   Year column name is `HY_{year}` for H1, `FY_{year}` for H2.
 - `create_risk_adjustment(goc_names, values, output_path)` — writes a
   `Risk_Adjustment.xlsx` file (columns `ObservationID`, `Risk_Adjustment`).
+- `lookup_payment_pattern_values(path, goc_names, year, semester, sheet="pp_AAI_REINS", goc_column="C", year_column="D", header_row=1)`
+  — reads Payment Pattern rows from the Payment_Patterns workbook. Year
+  label in column D has no underscore (e.g. `FY2025`, `HY2024`). Emits
+  two rows per GoC (`year` and `year-1`) with 23 data columns (`0`..`22`).
+- `create_payment_pattern(rows, output_path)` — writes a
+  `Payment_pattern.xlsx` file (columns `GoC`, `Year`, `0`..`22`).
 
 ## Output contract
 - Save the results as `{run_dir}/MP_LoB.xlsx`,
-  `{run_dir}/MP_ObservationYear.xlsx` and
-  `{run_dir}/Risk_Adjustment.xlsx`. Never overwrite the inputs.
+  `{run_dir}/MP_ObservationYear.xlsx`, `{run_dir}/Risk_Adjustment.xlsx`
+  and `{run_dir}/Payment_pattern.xlsx`. Never overwrite the inputs.
 - Reply with one sentence summarising what you did, listing the tools you
   called and the final output paths.

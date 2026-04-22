@@ -9,8 +9,10 @@ import pytest
 from excel_pipeline.skill import (
     create_mp_lob,
     create_mp_observation_year,
+    create_payment_pattern,
     create_risk_adjustment,
     extract_unique_goc_names,
+    lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
 )
 
@@ -292,3 +294,125 @@ def test_create_risk_adjustment_missing_values_become_empty(tmp_path: Path) -> N
         ("Motor@Opening", None),
         ("Motor@Closing", None),
     ]
+
+
+def _build_pp_sheet_fixture(path: Path) -> None:
+    """Fixture of the pp_AAI_REINS sheet for Payment Pattern lookups."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "pp_AAI_REINS"
+    # Header row: A and B empty, C=GoC, D=Year, E..AA = '0'..'22'
+    ws.cell(row=1, column=3, value="GoC")
+    ws.cell(row=1, column=4, value="Year")
+    for i in range(23):
+        ws.cell(row=1, column=5 + i, value=str(i))
+
+    # Data rows — (goc, year_label, seed) -> values[i] = seed + i
+    data = [
+        ("Motor", "FY2024", 1000),
+        ("Motor", "FY2025", 2000),
+        ("Motor", "HY2024", 3000),
+        ("Motor", "HY2025", 4000),
+        ("Property", "FY2024", 5000),
+        ("Property", "FY2025", 6000),
+    ]
+    for r, (goc, year_label, seed) in enumerate(data, start=2):
+        ws.cell(row=r, column=3, value=goc)
+        ws.cell(row=r, column=4, value=year_label)
+        for i in range(23):
+            ws.cell(row=r, column=5 + i, value=seed + i)
+    wb.save(path)
+
+
+def test_lookup_payment_pattern_values_h2(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    _build_pp_sheet_fixture(fixture)
+
+    rows = lookup_payment_pattern_values(
+        path=str(fixture),
+        goc_names=["Motor"],
+        year=2025,
+        semester=2,
+    )
+
+    # H2 -> FY prefix. Order: reference year, then year-1.
+    assert rows == [
+        {"goc": "Motor", "year": 2025, "values": [2000 + i for i in range(23)]},
+        {"goc": "Motor", "year": 2024, "values": [1000 + i for i in range(23)]},
+    ]
+
+
+def test_lookup_payment_pattern_values_h1(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    _build_pp_sheet_fixture(fixture)
+
+    rows = lookup_payment_pattern_values(
+        path=str(fixture),
+        goc_names=["Motor"],
+        year=2025,
+        semester=1,
+    )
+
+    # H1 -> HY prefix
+    assert rows[0]["values"][0] == 4000  # HY2025
+    assert rows[1]["values"][0] == 3000  # HY2024
+
+
+def test_lookup_payment_pattern_values_missing_row(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    _build_pp_sheet_fixture(fixture)
+
+    rows = lookup_payment_pattern_values(
+        path=str(fixture),
+        goc_names=["Property"],
+        year=2025,
+        semester=1,  # HY2025 / HY2024 — not in fixture for Property
+    )
+
+    assert rows[0]["values"] == [None] * 23
+    assert rows[1]["values"] == [None] * 23
+
+
+def test_lookup_payment_pattern_values_fewer_than_23_columns(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "pp_AAI_REINS"
+    ws.cell(row=1, column=3, value="GoC")
+    ws.cell(row=1, column=4, value="Year")
+    # Only 5 data columns
+    for i in range(5):
+        ws.cell(row=1, column=5 + i, value=str(i))
+    wb.save(fixture)
+
+    with pytest.raises(KeyError, match="23 data columns"):
+        lookup_payment_pattern_values(
+            path=str(fixture),
+            goc_names=["Motor"],
+            year=2025,
+            semester=2,
+        )
+
+
+def test_create_payment_pattern(tmp_path: Path) -> None:
+    output = tmp_path / "Payment_pattern.xlsx"
+    rows = [
+        {"goc": "Motor", "year": 2025, "values": [i for i in range(23)]},
+        {"goc": "Motor", "year": 2024, "values": [i * 10 for i in range(23)]},
+    ]
+
+    result = create_payment_pattern(rows=rows, output_path=str(output))
+
+    expected_headers = ["GoC", "Year"] + [str(i) for i in range(23)]
+    assert result == {
+        "output_path": str(output),
+        "rows": 2,
+        "columns": expected_headers,
+    }
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb["Payment_pattern"]
+    written = list(ws.iter_rows(values_only=True))
+    assert written[0] == tuple(expected_headers)
+    assert written[1] == ("Motor", 2025) + tuple(range(23))
+    assert written[2] == ("Motor", 2024) + tuple(i * 10 for i in range(23))
