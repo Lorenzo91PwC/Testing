@@ -72,7 +72,12 @@ with col_main:
         format_func=lambda e: f"{e[0]} — {e[1]}",
     )
 
-    if uploaded and entity and st.button("▶ Run pipeline", type="primary"):
+    run_clicked = st.button(
+        "▶ Run pipeline",
+        type="primary",
+        disabled=not (uploaded and entity),
+    )
+    if run_clicked and uploaded and entity:
         entity_id, entity_name = entity
         run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         run_dir = RUNS_DIR / run_id
