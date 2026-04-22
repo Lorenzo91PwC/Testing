@@ -45,6 +45,11 @@ _Awaiting customer specification._
   `AAI_P&C_Ceded` (e.g. `1.1_2025.12.31_AAI_P&C_Ceded.xlsx`), returns the
   unique GoC names from column AA of sheet `AAI_P&C_Ceded_H_NH`.
   Read-only and idempotent.
+- `create_mp_lob(goc_names, entity_id, output_path)` — writes an
+  `MP_LoB.xlsx` file with two columns (`GoC_ID`, `Entity_ID`). Typical
+  pipeline: call `extract_unique_goc_names` on the Ceded file, then feed
+  its `values` list plus the session's entity code into `create_mp_lob`,
+  saving to `{run_dir}/MP_LoB.xlsx`.
 
 ## Output contract
 - Save the result as `{run_dir}/phase1_output.xlsx`. Never overwrite the input.

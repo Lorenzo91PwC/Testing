@@ -121,6 +121,34 @@ def extract_unique_goc_names(
     }
 
 
+def create_mp_lob(
+    goc_names: list[str],
+    entity_id: int,
+    output_path: str,
+) -> dict[str, Any]:
+    """Create an ``MP_LoB`` workbook with two columns: ``GoC_ID`` and ``Entity_ID``.
+
+    ``GoC_ID`` is filled with the supplied unique GoC names (typically the
+    ``values`` result of ``extract_unique_goc_names``). ``Entity_ID`` is the
+    selected entity code, repeated on every data row. Overwrites the
+    output file if it already exists.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "MP_LoB"
+    ws.cell(row=1, column=1, value="GoC_ID")
+    ws.cell(row=1, column=2, value="Entity_ID")
+    for i, name in enumerate(goc_names, start=2):
+        ws.cell(row=i, column=1, value=name)
+        ws.cell(row=i, column=2, value=entity_id)
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows": len(goc_names),
+        "columns": ["GoC_ID", "Entity_ID"],
+    }
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================
@@ -213,6 +241,36 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["path"],
         },
     },
+    {
+        "name": "create_mp_lob",
+        "description": (
+            "Create an 'MP_LoB' workbook with two columns: 'GoC_ID' "
+            "(unique GoC names) and 'Entity_ID' (the analyzed company's "
+            "code, repeated on every data row). Typically called after "
+            "`extract_unique_goc_names`: pass its `values` list as "
+            "`goc_names` and the session's entity code as `entity_id`. "
+            "Overwrites the output file if it already exists."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goc_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Unique GoC names to use as GoC_ID values.",
+                },
+                "entity_id": {
+                    "type": "integer",
+                    "description": "Entity code of the company being analyzed.",
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Absolute path where MP_LoB.xlsx will be saved.",
+                },
+            },
+            "required": ["goc_names", "entity_id", "output_path"],
+        },
+    },
     # Add a schema entry for each domain-specific function above.
 ]
 
@@ -224,6 +282,7 @@ _DISPATCH: dict[str, Any] = {
     "inspect_workbook": inspect_workbook,
     "preview_rows": preview_rows,
     "extract_unique_goc_names": extract_unique_goc_names,
+    "create_mp_lob": create_mp_lob,
     # Add an entry for each domain-specific function above.
 }
 

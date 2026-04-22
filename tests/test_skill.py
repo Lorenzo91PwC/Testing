@@ -5,7 +5,7 @@ from pathlib import Path
 
 import openpyxl
 
-from excel_pipeline.skill import extract_unique_goc_names
+from excel_pipeline.skill import create_mp_lob, extract_unique_goc_names
 
 
 def _build_ceded_fixture(path: Path) -> None:
@@ -54,3 +54,50 @@ def test_extract_unique_goc_names_custom_column(tmp_path: Path) -> None:
     result = extract_unique_goc_names(str(fixture), column="B")
 
     assert result["values"] == ["A", "B"]
+
+
+def test_create_mp_lob(tmp_path: Path) -> None:
+    output = tmp_path / "MP_LoB.xlsx"
+    goc_names = ["Motor", "Property", "Liability"]
+
+    result = create_mp_lob(goc_names=goc_names, entity_id=6, output_path=str(output))
+
+    assert result == {
+        "output_path": str(output),
+        "rows": 3,
+        "columns": ["GoC_ID", "Entity_ID"],
+    }
+    assert output.exists()
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb["MP_LoB"]
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("GoC_ID", "Entity_ID"),
+        ("Motor", 6),
+        ("Property", 6),
+        ("Liability", 6),
+    ]
+
+
+def test_create_mp_lob_end_to_end(tmp_path: Path) -> None:
+    ceded = tmp_path / "1.1_2025.12.31_AAI_P&C_Ceded.xlsx"
+    _build_ceded_fixture(ceded)
+    output = tmp_path / "MP_LoB.xlsx"
+
+    extracted = extract_unique_goc_names(str(ceded))
+    create_mp_lob(
+        goc_names=extracted["values"],
+        entity_id=14,
+        output_path=str(output),
+    )
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb["MP_LoB"]
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("GoC_ID", "Entity_ID"),
+        ("Motor", 14),
+        ("Property", 14),
+        ("Liability", 14),
+    ]
