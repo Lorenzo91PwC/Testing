@@ -38,6 +38,14 @@ explaining exactly which function would need to be added. Do not improvise.
 
 _Awaiting customer specification._
 
+### Available domain tools
+
+- `extract_unique_goc_names(path, sheet="AAI_P&C_Ceded_H_NH", column="AA")`
+  — on the input file whose name ends with the fixed suffix
+  `AAI_P&C_Ceded` (e.g. `1.1_2025.12.31_AAI_P&C_Ceded.xlsx`), returns the
+  unique GoC names from column AA of sheet `AAI_P&C_Ceded_H_NH`.
+  Read-only and idempotent.
+
 ## Output contract
 - Save the result as `{run_dir}/phase1_output.xlsx`. Never overwrite the input.
 - Reply with one sentence summarising what you did, listing the tools you
