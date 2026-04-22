@@ -98,16 +98,29 @@ def _run_tool_loop(system_prompt: str, user_message: str) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def run_phase(phase: str, input_path: Path, run_dir: Path) -> Path:
+def run_phase(
+    phase: str,
+    input_path: Path,
+    run_dir: Path,
+    entity_id: int | None = None,
+    entity_name: str | None = None,
+) -> Path:
     """Run a phase subagent and return the path to its output file.
 
     The subagent is expected to write `{phase}_output.xlsx` in the run dir.
     """
     system_prompt = _load_prompt(phase)
+    entity_line = (
+        f"Entity: {entity_id} — {entity_name}\n"
+        if entity_id is not None and entity_name is not None
+        else ""
+    )
     user_message = (
         f"Input file: {input_path}\n"
         f"Run directory: {run_dir}\n"
-        f"Phase: {phase}\n\n"
+        f"Phase: {phase}\n"
+        f"{entity_line}"
+        f"\n"
         f"Apply the transformations described in your instructions, then "
         f"save the output as {phase}_output.xlsx in the run directory."
     )

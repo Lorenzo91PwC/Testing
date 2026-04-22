@@ -26,6 +26,13 @@ RUNS_DIR.mkdir(exist_ok=True)
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+ENTITIES: list[tuple[int, str]] = [
+    (14, "MPS"),
+    (6, "AAI"),
+    (11, "DIRECT ITALY"),
+    (19, "NOBIS"),
+]
+
 st.set_page_config(
     page_title="Excel Pipeline",
     page_icon="📊",
@@ -59,8 +66,14 @@ col_main, col_chat = st.columns([2, 1])
 with col_main:
     st.subheader("1. Upload input file")
     uploaded = st.file_uploader("Excel file", type=["xlsx", "xlsm"])
+    entity = st.selectbox(
+        "Entity to analyze",
+        options=ENTITIES,
+        format_func=lambda e: f"{e[0]} — {e[1]}",
+    )
 
-    if uploaded and st.button("▶ Run pipeline", type="primary"):
+    if uploaded and entity and st.button("▶ Run pipeline", type="primary"):
+        entity_id, entity_name = entity
         run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         run_dir = RUNS_DIR / run_id
         run_dir.mkdir(parents=True)
@@ -76,6 +89,8 @@ with col_main:
                     phase="phase1",
                     input_path=input_path,
                     run_dir=run_dir,
+                    entity_id=entity_id,
+                    entity_name=entity_name,
                 )
                 st.write(f"✅ Phase 1 → `{phase1_out.name}`")
 
@@ -84,6 +99,8 @@ with col_main:
                     phase="phase2",
                     input_path=phase1_out,
                     run_dir=run_dir,
+                    entity_id=entity_id,
+                    entity_name=entity_name,
                 )
                 st.write(f"✅ Phase 2 → `{phase2_out.name}`")
 
