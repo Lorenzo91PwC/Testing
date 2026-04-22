@@ -108,7 +108,7 @@ with col_main:
         with st.status("Running pipeline...", expanded=True) as status:
             try:
                 status.update(label="Phase 1 in progress...")
-                phase1_out = run_phase1(
+                phase1_outputs = run_phase1(
                     input_paths=input_paths,
                     run_dir=run_dir,
                     entity_id=entity_id,
@@ -116,7 +116,8 @@ with col_main:
                     year=int(year),
                     semester=int(semester),
                 )
-                st.write(f"✅ Phase 1 → `{phase1_out.name}`")
+                for out in phase1_outputs:
+                    st.write(f"✅ Phase 1 → `{out.name}`")
 
                 status.update(label="Pipeline complete", state="complete")
             except Exception as e:

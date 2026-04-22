@@ -5,7 +5,11 @@ from pathlib import Path
 
 import openpyxl
 
-from excel_pipeline.skill import create_mp_lob, extract_unique_goc_names
+from excel_pipeline.skill import (
+    create_mp_lob,
+    create_mp_observation_year,
+    extract_unique_goc_names,
+)
 
 
 def _build_ceded_fixture(path: Path) -> None:
@@ -105,4 +109,52 @@ def test_create_mp_lob_end_to_end(tmp_path: Path) -> None:
         ("Motor", 14),
         ("Property", 14),
         ("Liability", 14),
+    ]
+
+
+def test_create_mp_observation_year(tmp_path: Path) -> None:
+    output = tmp_path / "MP_ObservationYear.xlsx"
+    goc_names = ["Motor", "Property"]
+
+    result = create_mp_observation_year(
+        goc_names=goc_names, year=2025, output_path=str(output),
+    )
+
+    assert result == {
+        "output_path": str(output),
+        "rows": 4,
+        "columns": [
+            "ObservationID",
+            "ObservationYear",
+            "LoB_ID",
+            "AdjULAEPagate",
+            "CY",
+        ],
+    }
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb["MP_ObservationYear"]
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
+        ("Motor@Opening", 2024, "Motor", 0, "Yes"),
+        ("Motor@Closing", 2025, "Motor", 0, "Yes"),
+        ("Property@Opening", 2024, "Property", 0, "Yes"),
+        ("Property@Closing", 2025, "Property", 0, "Yes"),
+    ]
+
+
+def test_create_mp_observation_year_empty(tmp_path: Path) -> None:
+    output = tmp_path / "MP_ObservationYear.xlsx"
+
+    result = create_mp_observation_year(
+        goc_names=[], year=2025, output_path=str(output),
+    )
+
+    assert result["rows"] == 0
+    wb = openpyxl.load_workbook(output)
+    ws = wb["MP_ObservationYear"]
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
     ]

@@ -28,15 +28,22 @@ explaining exactly which function would need to be added. Do not improvise.
    names from column AA of sheet `AAI_P&C_Ceded_H_NH`.
 3. Call `create_mp_lob` with those names, the session's `entity_id` (from
    the context message), and `output_path = {run_dir}/MP_LoB.xlsx`.
+4. Call `create_mp_observation_year` with those names, the session's
+   `year` (from the context message), and
+   `output_path = {run_dir}/MP_ObservationYear.xlsx`.
 
 ### Available domain tools
 
-- `extract_unique_goc_names(path, sheet="AAI_P&C_Ceded_H_NH", column="AA")`
+- `extract_unique_goc_names(path, sheet="AAI_P&C_Ceded_H_NH", column="AA", start_row=3)`
   — returns unique GoC names. Read-only and idempotent.
 - `create_mp_lob(goc_names, entity_id, output_path)` — writes an
   `MP_LoB.xlsx` file with two columns (`GoC_ID`, `Entity_ID`).
+- `create_mp_observation_year(goc_names, year, output_path)` — writes an
+  `MP_ObservationYear.xlsx` file with two rows per GoC (`@Opening` using
+  `year - 1`, `@Closing` using `year`).
 
 ## Output contract
-- Save the result as `{run_dir}/MP_LoB.xlsx`. Never overwrite the input.
+- Save the results as `{run_dir}/MP_LoB.xlsx` and
+  `{run_dir}/MP_ObservationYear.xlsx`. Never overwrite the input.
 - Reply with one sentence summarising what you did, listing the tools you
-  called and the final output path.
+  called and the final output paths.

@@ -154,6 +154,50 @@ def create_mp_lob(
     }
 
 
+def create_mp_observation_year(
+    goc_names: list[str],
+    year: int,
+    output_path: str,
+) -> dict[str, Any]:
+    """Create an ``MP_ObservationYear`` workbook.
+
+    Two rows are written per GoC — an ``Opening`` row (year - 1) and a
+    ``Closing`` row (year). Columns: ``ObservationID`` (``{goc}@Opening``
+    or ``{goc}@Closing``), ``ObservationYear``, ``LoB_ID`` (the GoC),
+    ``AdjULAEPagate`` (always ``0``), ``CY`` (always ``Yes``). Overwrites
+    the output file if it already exists.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "MP_ObservationYear"
+    headers = ["ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"]
+    for col, h in enumerate(headers, start=1):
+        ws.cell(row=1, column=col, value=h)
+
+    row = 2
+    for name in goc_names:
+        ws.cell(row=row, column=1, value=f"{name}@Opening")
+        ws.cell(row=row, column=2, value=year - 1)
+        ws.cell(row=row, column=3, value=name)
+        ws.cell(row=row, column=4, value=0)
+        ws.cell(row=row, column=5, value="Yes")
+        row += 1
+
+        ws.cell(row=row, column=1, value=f"{name}@Closing")
+        ws.cell(row=row, column=2, value=year)
+        ws.cell(row=row, column=3, value=name)
+        ws.cell(row=row, column=4, value=0)
+        ws.cell(row=row, column=5, value="Yes")
+        row += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows": 2 * len(goc_names),
+        "columns": headers,
+    }
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================
@@ -281,6 +325,36 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["goc_names", "entity_id", "output_path"],
         },
     },
+    {
+        "name": "create_mp_observation_year",
+        "description": (
+            "Create an 'MP_ObservationYear' workbook with five columns: "
+            "ObservationID ('{goc}@Opening' or '{goc}@Closing'), "
+            "ObservationYear (year-1 for Opening, year for Closing), "
+            "LoB_ID (the GoC name), AdjULAEPagate (always 0), CY (always "
+            "'Yes'). Two rows per GoC. Typically called after "
+            "`extract_unique_goc_names`. Overwrites the output file."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goc_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Unique GoC names.",
+                },
+                "year": {
+                    "type": "integer",
+                    "description": "Analysis year (used for Closing; Opening = year-1).",
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Absolute path where MP_ObservationYear.xlsx will be saved.",
+                },
+            },
+            "required": ["goc_names", "year", "output_path"],
+        },
+    },
     # Add a schema entry for each domain-specific function above.
 ]
 
@@ -293,6 +367,7 @@ _DISPATCH: dict[str, Any] = {
     "preview_rows": preview_rows,
     "extract_unique_goc_names": extract_unique_goc_names,
     "create_mp_lob": create_mp_lob,
+    "create_mp_observation_year": create_mp_observation_year,
     # Add an entry for each domain-specific function above.
 }
 

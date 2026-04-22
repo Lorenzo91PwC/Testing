@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .skill import create_mp_lob, extract_unique_goc_names
+from .skill import (
+    create_mp_lob,
+    create_mp_observation_year,
+    extract_unique_goc_names,
+)
 
 CEDED_SUFFIX = "AAI_P&C_Ceded"
 
@@ -40,25 +44,39 @@ def run_phase1(
     entity_name: str,
     year: int,
     semester: int,
-) -> Path:
-    """Phase 1: Ceded → MP_LoB.
+) -> list[Path]:
+    """Phase 1: Ceded → MP_LoB + MP_ObservationYear.
 
-    Picks the input file ending in the Ceded suffix, extracts the unique
-    GoC names from column AA of sheet ``AAI_P&C_Ceded_H_NH``, and writes
-    ``{run_dir}/MP_LoB.xlsx`` with columns ``GoC_ID`` and ``Entity_ID``.
-    Returns the path to the output file.
+    Picks the input file ending in the Ceded suffix and extracts the unique
+    GoC names from column AA of sheet ``AAI_P&C_Ceded_H_NH``. Then writes:
 
-    ``entity_name``, ``year`` and ``semester`` are accepted for symmetry
-    with the UI call site but are not used by the current transformations.
+    - ``{run_dir}/MP_LoB.xlsx`` — columns ``GoC_ID``, ``Entity_ID``.
+    - ``{run_dir}/MP_ObservationYear.xlsx`` — two rows per GoC
+      (``@Opening`` with ``year-1`` and ``@Closing`` with ``year``), columns
+      ``ObservationID``, ``ObservationYear``, ``LoB_ID``, ``AdjULAEPagate``,
+      ``CY``.
+
+    Returns the list of output paths in the order they were produced.
+    ``entity_name`` and ``semester`` are accepted for symmetry with the UI
+    call site but are not used by the current transformations.
     """
-    del entity_name, year, semester  # reserved for future phases
+    del entity_name, semester  # reserved for future phases
 
     ceded_path = _find_ceded_file(input_paths)
-    extracted = extract_unique_goc_names(str(ceded_path))
-    output_path = run_dir / "MP_LoB.xlsx"
+    goc_names = extract_unique_goc_names(str(ceded_path))["values"]
+
+    mp_lob_path = run_dir / "MP_LoB.xlsx"
     create_mp_lob(
-        goc_names=extracted["values"],
+        goc_names=goc_names,
         entity_id=entity_id,
-        output_path=str(output_path),
+        output_path=str(mp_lob_path),
     )
-    return output_path
+
+    mp_obs_path = run_dir / "MP_ObservationYear.xlsx"
+    create_mp_observation_year(
+        goc_names=goc_names,
+        year=year,
+        output_path=str(mp_obs_path),
+    )
+
+    return [mp_lob_path, mp_obs_path]

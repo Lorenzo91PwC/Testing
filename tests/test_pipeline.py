@@ -28,7 +28,7 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
     ceded = inputs_dir / "1.1_2025.12.31_AAI_P&C_Ceded.xlsx"
     _build_ceded_fixture(ceded)
 
-    out = run_phase1(
+    outputs = run_phase1(
         input_paths=[ceded],
         run_dir=tmp_path,
         entity_id=6,
@@ -37,16 +37,32 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         semester=2,
     )
 
-    assert out == tmp_path / "MP_LoB.xlsx"
-    assert out.exists()
+    assert outputs == [
+        tmp_path / "MP_LoB.xlsx",
+        tmp_path / "MP_ObservationYear.xlsx",
+    ]
+    for p in outputs:
+        assert p.exists()
 
-    wb = openpyxl.load_workbook(out)
-    rows = list(wb["MP_LoB"].iter_rows(values_only=True))
-    assert rows == [
+    mp_lob = list(openpyxl.load_workbook(outputs[0])["MP_LoB"].iter_rows(values_only=True))
+    assert mp_lob == [
         ("GoC_ID", "Entity_ID"),
         ("Motor", 6),
         ("Property", 6),
         ("Liability", 6),
+    ]
+
+    mp_obs = list(
+        openpyxl.load_workbook(outputs[1])["MP_ObservationYear"].iter_rows(values_only=True)
+    )
+    assert mp_obs == [
+        ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
+        ("Motor@Opening", 2024, "Motor", 0, "Yes"),
+        ("Motor@Closing", 2025, "Motor", 0, "Yes"),
+        ("Property@Opening", 2024, "Property", 0, "Yes"),
+        ("Property@Closing", 2025, "Property", 0, "Yes"),
+        ("Liability@Opening", 2024, "Liability", 0, "Yes"),
+        ("Liability@Closing", 2025, "Liability", 0, "Yes"),
     ]
 
 
@@ -75,7 +91,7 @@ def test_run_phase1_picks_matching_file(tmp_path: Path) -> None:
     unrelated = inputs_dir / "notes.xlsx"
     openpyxl.Workbook().save(unrelated)
 
-    out = run_phase1(
+    outputs = run_phase1(
         input_paths=[unrelated, ceded],
         run_dir=tmp_path,
         entity_id=14,
@@ -84,6 +100,7 @@ def test_run_phase1_picks_matching_file(tmp_path: Path) -> None:
         semester=1,
     )
 
-    wb = openpyxl.load_workbook(out)
-    rows = list(wb["MP_LoB"].iter_rows(values_only=True))
-    assert rows[1:] == [("Motor", 14), ("Property", 14), ("Liability", 14)]
+    mp_lob_rows = list(
+        openpyxl.load_workbook(outputs[0])["MP_LoB"].iter_rows(values_only=True)
+    )
+    assert mp_lob_rows[1:] == [("Motor", 14), ("Property", 14), ("Liability", 14)]
