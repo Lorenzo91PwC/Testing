@@ -31,6 +31,12 @@ explaining exactly which function would need to be added. Do not improvise.
 4. Call `create_mp_observation_year` with those names, the session's
    `year` (from the context message), and
    `output_path = {run_dir}/MP_ObservationYear.xlsx`.
+5. Identify the input file whose name ends with
+   `Payment_Patterns_&_Risk_Adjustments`.
+6. Call `lookup_risk_adjustment_values` with that file's path, the GoC
+   names, and the session's `year` and `semester`.
+7. Call `create_risk_adjustment` with the GoC names, the values from
+   step 6, and `output_path = {run_dir}/Risk_Adjustment.xlsx`.
 
 ### Available domain tools
 
@@ -41,9 +47,15 @@ explaining exactly which function would need to be added. Do not improvise.
 - `create_mp_observation_year(goc_names, year, output_path)` — writes an
   `MP_ObservationYear.xlsx` file with two rows per GoC (`@Opening` using
   `year - 1`, `@Closing` using `year`).
+- `lookup_risk_adjustment_values(path, goc_names, year, semester, sheet="ra_AAI_REINS", goc_column="G", header_row=1)`
+  — reads Opening/Closing RA values from the Payment_Patterns workbook.
+  Year column name is `HY_{year}` for H1, `FY_{year}` for H2.
+- `create_risk_adjustment(goc_names, values, output_path)` — writes a
+  `Risk_Adjustment.xlsx` file (columns `ObservationID`, `Risk_Adjustment`).
 
 ## Output contract
-- Save the results as `{run_dir}/MP_LoB.xlsx` and
-  `{run_dir}/MP_ObservationYear.xlsx`. Never overwrite the input.
+- Save the results as `{run_dir}/MP_LoB.xlsx`,
+  `{run_dir}/MP_ObservationYear.xlsx` and
+  `{run_dir}/Risk_Adjustment.xlsx`. Never overwrite the inputs.
 - Reply with one sentence summarising what you did, listing the tools you
   called and the final output paths.

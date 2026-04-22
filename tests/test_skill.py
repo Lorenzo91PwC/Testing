@@ -4,11 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
+import pytest
 
 from excel_pipeline.skill import (
     create_mp_lob,
     create_mp_observation_year,
+    create_risk_adjustment,
     extract_unique_goc_names,
+    lookup_risk_adjustment_values,
 )
 
 
@@ -157,4 +160,135 @@ def test_create_mp_observation_year_empty(tmp_path: Path) -> None:
     rows = list(ws.iter_rows(values_only=True))
     assert rows == [
         ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
+    ]
+
+
+def _build_payment_patterns_fixture(path: Path) -> None:
+    """Fixture shaped like Payment_Patterns_&_Risk_Adjustments."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "ra_AAI_REINS"
+    # Column G = 7; header row 1.
+    ws.cell(row=1, column=7, value="GoC")
+    headers = ["HY_2024", "FY_2024", "HY_2025", "FY_2025"]
+    for i, h in enumerate(headers, start=8):  # H, I, J, K
+        ws.cell(row=1, column=i, value=h)
+    data = [
+        ("Motor", 100, 110, 120, 130),
+        ("Property", 200, 210, 220, 230),
+        ("Liability", 300, 310, 320, 330),
+    ]
+    for r, (goc, hy24, fy24, hy25, fy25) in enumerate(data, start=2):
+        ws.cell(row=r, column=7, value=goc)
+        ws.cell(row=r, column=8, value=hy24)
+        ws.cell(row=r, column=9, value=fy24)
+        ws.cell(row=r, column=10, value=hy25)
+        ws.cell(row=r, column=11, value=fy25)
+    wb.save(path)
+
+
+def test_lookup_risk_adjustment_values_h2(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    _build_payment_patterns_fixture(fixture)
+
+    values = lookup_risk_adjustment_values(
+        path=str(fixture),
+        goc_names=["Motor", "Property", "Liability"],
+        year=2025,
+        semester=2,
+    )
+
+    # H2 2025: Closing = FY_2025, Opening = FY_2024
+    assert values == {
+        "Motor": {"opening": 110, "closing": 130},
+        "Property": {"opening": 210, "closing": 230},
+        "Liability": {"opening": 310, "closing": 330},
+    }
+
+
+def test_lookup_risk_adjustment_values_h1(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    _build_payment_patterns_fixture(fixture)
+
+    values = lookup_risk_adjustment_values(
+        path=str(fixture),
+        goc_names=["Motor"],
+        year=2025,
+        semester=1,
+    )
+
+    # H1 2025: Closing = HY_2025, Opening = HY_2024
+    assert values == {"Motor": {"opening": 100, "closing": 120}}
+
+
+def test_lookup_risk_adjustment_values_missing_goc(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    _build_payment_patterns_fixture(fixture)
+
+    values = lookup_risk_adjustment_values(
+        path=str(fixture),
+        goc_names=["Motor", "UnknownGoC"],
+        year=2025,
+        semester=2,
+    )
+
+    assert values["UnknownGoC"] == {"opening": None, "closing": None}
+
+
+def test_lookup_risk_adjustment_values_missing_year_column(tmp_path: Path) -> None:
+    fixture = tmp_path / "pp.xlsx"
+    _build_payment_patterns_fixture(fixture)
+
+    with pytest.raises(KeyError, match=r"FY_20(29|30).*ra_AAI_REINS"):
+        lookup_risk_adjustment_values(
+            path=str(fixture),
+            goc_names=["Motor"],
+            year=2030,
+            semester=2,
+        )
+
+
+def test_create_risk_adjustment(tmp_path: Path) -> None:
+    output = tmp_path / "Risk_Adjustment.xlsx"
+    goc_names = ["Motor", "Property"]
+    values = {
+        "Motor": {"opening": 110, "closing": 130},
+        "Property": {"opening": 210, "closing": 230},
+    }
+
+    result = create_risk_adjustment(
+        goc_names=goc_names, values=values, output_path=str(output),
+    )
+
+    assert result == {
+        "output_path": str(output),
+        "rows": 4,
+        "columns": ["ObservationID", "Risk_Adjustment"],
+    }
+
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["Risk_Adjustment"].iter_rows(values_only=True))
+    assert rows == [
+        ("ObservationID", "Risk_Adjustment"),
+        ("Motor@Opening", 110),
+        ("Motor@Closing", 130),
+        ("Property@Opening", 210),
+        ("Property@Closing", 230),
+    ]
+
+
+def test_create_risk_adjustment_missing_values_become_empty(tmp_path: Path) -> None:
+    output = tmp_path / "Risk_Adjustment.xlsx"
+    values = {"Motor": {"opening": None, "closing": None}}
+
+    create_risk_adjustment(
+        goc_names=["Motor"], values=values, output_path=str(output),
+    )
+
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["Risk_Adjustment"].iter_rows(values_only=True))
+    assert rows == [
+        ("ObservationID", "Risk_Adjustment"),
+        ("Motor@Opening", None),
+        ("Motor@Closing", None),
     ]
