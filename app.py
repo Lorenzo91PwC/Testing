@@ -64,7 +64,7 @@ with col_main:
     )
 
     st.subheader("2. Analysis parameters")
-    col_year, col_sem = st.columns(2)
+    col_year, col_sem, col_type = st.columns(3)
     with col_year:
         year = st.number_input(
             "Year",
@@ -79,6 +79,12 @@ with col_main:
             options=[1, 2],
             horizontal=True,
             format_func=lambda s: f"H{s}",
+        )
+    with col_type:
+        business_type = st.radio(
+            "Business type",
+            options=["Diretto", "Ceduto"],
+            horizontal=True,
         )
     entity = st.selectbox(
         "Entity to analyze",
