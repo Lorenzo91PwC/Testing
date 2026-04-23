@@ -414,6 +414,22 @@ def create_payment_pattern(
     }
 
 
+def create_empty_workbook(
+    output_path: str,
+    sheet_name: str = "Sheet1",
+) -> dict[str, Any]:
+    """Create a workbook containing a single empty sheet.
+
+    Used as a placeholder until population rules for an output file are
+    defined. Overwrites the output file if it already exists.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    save_workbook(wb, output_path)
+    return {"output_path": output_path, "rows": 0, "columns": []}
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================

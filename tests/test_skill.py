@@ -7,6 +7,7 @@ import openpyxl
 import pytest
 
 from excel_pipeline.skill import (
+    create_empty_workbook,
     create_mp_lob,
     create_mp_observation_year,
     create_payment_pattern,
@@ -416,3 +417,21 @@ def test_create_payment_pattern(tmp_path: Path) -> None:
     assert written[0] == tuple(expected_headers)
     assert written[1] == ("Motor", 2025) + tuple(range(23))
     assert written[2] == ("Motor", 2024) + tuple(i * 10 for i in range(23))
+
+
+def test_create_empty_workbook(tmp_path: Path) -> None:
+    output = tmp_path / "Empty.xlsx"
+
+    result = create_empty_workbook(str(output), sheet_name="Astra_Placeholder")
+
+    assert result == {
+        "output_path": str(output),
+        "rows": 0,
+        "columns": [],
+    }
+    assert output.exists()
+
+    wb = openpyxl.load_workbook(output)
+    assert wb.sheetnames == ["Astra_Placeholder"]
+    ws = wb["Astra_Placeholder"]
+    assert list(ws.iter_rows(values_only=True)) == []

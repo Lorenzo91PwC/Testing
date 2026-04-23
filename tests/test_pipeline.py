@@ -6,7 +6,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from excel_pipeline.pipeline import run_phase1
+from excel_pipeline.pipeline import run_astra_phase1, run_phase1
 
 
 def _build_ceded_fixture(path: Path) -> None:
@@ -194,3 +194,18 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
         ("Liability@Opening", 300),
         ("Liability@Closing", 320),
     ]
+
+
+def test_run_astra_phase1_produces_two_empty_workbooks(tmp_path: Path) -> None:
+    outputs = run_astra_phase1(input_paths=[], run_dir=tmp_path)
+
+    assert outputs == [
+        tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
+        tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
+    ]
+    for p in outputs:
+        assert p.exists()
+        wb = openpyxl.load_workbook(p)
+        # One sheet, no data
+        assert len(wb.sheetnames) == 1
+        assert list(wb[wb.sheetnames[0]].iter_rows(values_only=True)) == []

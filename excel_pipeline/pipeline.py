@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .skill import (
+    create_empty_workbook,
     create_mp_lob,
     create_mp_observation_year,
     create_payment_pattern,
@@ -116,3 +117,27 @@ def run_phase1(
     )
 
     return [mp_lob_path, mp_obs_path, ra_path, payment_pattern_path]
+
+
+# ---------------------------------------------------------------------------
+# Astra
+# ---------------------------------------------------------------------------
+def run_astra_phase1(
+    input_paths: list[Path],
+    run_dir: Path,
+) -> list[Path]:
+    """Astra Phase 1 — placeholder.
+
+    TODO: replace with real population rules once defined. At the moment
+    this just writes two empty workbooks in ``run_dir``:
+    ``OCI_OPTION_CF_CLOSING.xlsx`` and ``OCI_OPTION_CF_OPENING.xlsx``.
+    ``input_paths`` is accepted for symmetry with a future real
+    implementation but is not consumed yet.
+    """
+    del input_paths  # unused for now
+
+    closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
+    opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
+    create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
+    create_empty_workbook(str(opening_path), sheet_name="OCI_OPTION_CF_OPENING")
+    return [closing_path, opening_path]
