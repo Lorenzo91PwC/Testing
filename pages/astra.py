@@ -38,10 +38,15 @@ st.title("🚀 Astra Input Builder")
 st.caption("Local pipeline that prepares Astra input files — data never leaves this machine.")
 
 st.warning(
-    "⚠️ **Reminder** — the population rules for `OCI_OPTION_CF_CLOSING.xlsx` "
-    "and `OCI_OPTION_CF_OPENING.xlsx` are not yet defined. Those files are "
-    "still produced as empty placeholders. `NEW_BUSINESS_PPOS.xlsx` is "
-    "wired and uses the GoC list + analysis year from the last Sunrise run.",
+    "⚠️ **Pending specifications** — the following outputs still need their "
+    "population rules:\n\n"
+    "- `OCI_OPTION_CF_CLOSING.xlsx` and `OCI_OPTION_CF_OPENING.xlsx` — "
+    "rules not yet defined; currently produced as empty placeholders.\n"
+    "- `INCEPTION_FORWARD_RATES.xlsx` — the source input file (suffix and "
+    "sheet) and the specific rates row to extract are still to be defined; "
+    "the output is not produced yet.\n\n"
+    "`NEW_BUSINESS_PPOS.xlsx` is fully wired and uses the GoC list + "
+    "analysis year from the last Sunrise run.",
     icon="🚧",
 )
 
