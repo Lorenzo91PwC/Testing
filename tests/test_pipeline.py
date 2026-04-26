@@ -202,7 +202,7 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     ]
 
 
-def test_run_astra_phase1_produces_five_workbooks(tmp_path: Path) -> None:
+def test_run_astra_phase1_produces_six_workbooks(tmp_path: Path) -> None:
     outputs = run_astra_phase1(
         input_paths=[],
         run_dir=tmp_path,
@@ -214,6 +214,7 @@ def test_run_astra_phase1_produces_five_workbooks(tmp_path: Path) -> None:
         tmp_path / "NEW_BUSINESS_PPOS.xlsx",
         tmp_path / "COVERAGE_UNIT.xlsx",
         tmp_path / "REINSURANCE.xlsx",
+        tmp_path / "MANDATORY_ACTUALS.xlsx",
         tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
         tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
     ]
@@ -249,8 +250,20 @@ def test_run_astra_phase1_produces_five_workbooks(tmp_path: Path) -> None:
     assert rein_rows[17] == ("IT05PABPPLE2024", "LOSSRECO_CLOSING", 0, 2024)
     assert rein_rows[33] == ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024)
 
+    # MANDATORY_ACTUALS: 256 rows per GoC + header.
+    ma_rows = list(
+        openpyxl.load_workbook(outputs[3])["MANDATORY_ACTUALS"].iter_rows(values_only=True)
+    )
+    assert ma_rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
+    assert len(ma_rows) == 1 + 2 * 16 * 16
+    assert ma_rows[1] == ("IT05PABPPLE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
+    # Last variable of first cohort year is at row index 16 (1 header + 16 vars)
+    assert ma_rows[16] == ("IT05PABPPLE2024", "THEORETICAL_PREMIUM_DERECOGNITION_LIC", 0)
+    # Second cohort year starts at row index 17
+    assert ma_rows[17] == ("IT05PABPPLE2023", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
+
     # OCI files are still empty placeholders
-    for p in outputs[3:]:
+    for p in outputs[4:]:
         wb = openpyxl.load_workbook(p)
         assert len(wb.sheetnames) == 1
         assert list(wb[wb.sheetnames[0]].iter_rows(values_only=True)) == []

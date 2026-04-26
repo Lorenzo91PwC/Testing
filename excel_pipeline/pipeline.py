@@ -17,6 +17,7 @@ from typing import Any
 from .skill import (
     create_coverage_unit,
     create_empty_workbook,
+    create_mandatory_actuals,
     create_mp_lob,
     create_mp_observation_year,
     create_new_business_ppos,
@@ -159,6 +160,9 @@ def run_astra_phase1(
     - ``{run_dir}/REINSURANCE.xlsx`` — four columns
       (``GOC_ID``, ``VARIABLE_NAME``, ``1``, ``T``); 32 rows per GoC
       (16 ``LOSSRECO_IFE_ALLOCATION`` then 16 ``LOSSRECO_CLOSING``).
+    - ``{run_dir}/MANDATORY_ACTUALS.xlsx`` — three columns
+      (``GOC_ID``, ``VARIABLE_NAME``, ``1``); 256 rows per GoC
+      (16 cohort years × 16 fixed variable names).
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder
       (population rules TODO).
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder
@@ -190,6 +194,13 @@ def run_astra_phase1(
         output_path=str(reinsurance_path),
     )
 
+    mandatory_actuals_path = run_dir / "MANDATORY_ACTUALS.xlsx"
+    create_mandatory_actuals(
+        goc_names=goc_names,
+        year=year,
+        output_path=str(mandatory_actuals_path),
+    )
+
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
@@ -199,6 +210,7 @@ def run_astra_phase1(
         new_business_path,
         coverage_unit_path,
         reinsurance_path,
+        mandatory_actuals_path,
         closing_path,
         opening_path,
     ]

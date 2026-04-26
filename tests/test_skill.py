@@ -7,8 +7,10 @@ import openpyxl
 import pytest
 
 from excel_pipeline.skill import (
+    MANDATORY_ACTUALS_VARIABLE_NAMES,
     create_coverage_unit,
     create_empty_workbook,
+    create_mandatory_actuals,
     create_mp_lob,
     create_mp_observation_year,
     create_new_business_ppos,
@@ -594,3 +596,65 @@ def test_create_reinsurance_empty_goc_list(tmp_path: Path) -> None:
     wb = openpyxl.load_workbook(output)
     rows = list(wb["REINSURANCE"].iter_rows(values_only=True))
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1, "T")]
+
+
+def test_create_mandatory_actuals(tmp_path: Path) -> None:
+    output = tmp_path / "MANDATORY_ACTUALS.xlsx"
+    assert len(MANDATORY_ACTUALS_VARIABLE_NAMES) == 16  # guard the spec
+
+    result = create_mandatory_actuals(
+        goc_names=["IT05PABPPLE", "IT06ABCDE"],
+        year=2024,
+        output_path=str(output),
+    )
+
+    assert result == {
+        "output_path": str(output),
+        "rows": 2 * 16 * 16,
+        "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
+    }
+
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["MANDATORY_ACTUALS"].iter_rows(values_only=True))
+
+    assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
+    # 1 header + (2 GoCs * 16 cohort years * 16 variables)
+    assert len(rows) == 1 + 2 * 16 * 16
+
+    # First (GoC, year) block: all 16 variables for IT05PABPPLE2024
+    expected_first_block = [
+        ("IT05PABPPLE2024", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
+    ]
+    assert rows[1:17] == expected_first_block
+
+    # Second (GoC, year) block: all 16 variables for IT05PABPPLE2023
+    expected_second_block = [
+        ("IT05PABPPLE2023", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
+    ]
+    assert rows[17:33] == expected_second_block
+
+    # Last cohort row of first GoC is at year 2009
+    last_first_goc_block = [
+        ("IT05PABPPLE2009", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
+    ]
+    assert rows[1 + 15 * 16 : 1 + 16 * 16] == last_first_goc_block
+
+    # Second GoC starts immediately after — index 1 + 16 * 16 = 257
+    assert rows[1 + 16 * 16] == (
+        "IT06ABCDE2024",
+        MANDATORY_ACTUALS_VARIABLE_NAMES[0],
+        0,
+    )
+
+
+def test_create_mandatory_actuals_empty_goc_list(tmp_path: Path) -> None:
+    output = tmp_path / "MANDATORY_ACTUALS.xlsx"
+
+    result = create_mandatory_actuals(
+        goc_names=[], year=2024, output_path=str(output),
+    )
+
+    assert result["rows"] == 0
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["MANDATORY_ACTUALS"].iter_rows(values_only=True))
+    assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]

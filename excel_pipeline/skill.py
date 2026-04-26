@@ -523,6 +523,25 @@ def create_coverage_unit(
 
 REINSURANCE_VARIABLE_NAMES = ["LOSSRECO_IFE_ALLOCATION", "LOSSRECO_CLOSING"]
 
+MANDATORY_ACTUALS_VARIABLE_NAMES = [
+    "ACTUAL_PREMIUM_CF_PAST_SERVICE",
+    "ACTUAL_PREMIUM_CF_FUTURE_SERVICE",
+    "ACTUAL_ACQUISITION_CF_PAST_SERVICE",
+    "ACTUAL_ACQUISITION_CF_FUTURE_SERVICE",
+    "ACTUAL_INV_COMP_PAYABLE",
+    "ACTUAL_CHANGE_FV_FINANCIAL_UNDERLYING_ITEMS",
+    "FIN_RISK_MITIGATION",
+    "RE_RISK_MITIGATION",
+    "RE_RISK_MITIGATION_PNL",
+    "ACTUAL_COVERAGE_UNIT",
+    "THEORETICAL_PREMIUM_DERECOGNITION_LRC",
+    "THEORETICAL_PREMIUM_RECOGNITION",
+    "DERECOGNITION_ASSET_ACQ_CF_BF_INIT_RECOG",
+    "ACTUAL_COMMISSION_CF_PAST_SERVICE",
+    "ACTUAL_COMMISSION_CF_FUTURE_SERVICE",
+    "THEORETICAL_PREMIUM_DERECOGNITION_LIC",
+]
+
 
 def create_reinsurance(
     goc_names: list[str],
@@ -568,6 +587,54 @@ def create_reinsurance(
         "output_path": output_path,
         "rows": len(goc_names) * len(REINSURANCE_VARIABLE_NAMES) * ASTRA_COHORT_YEAR_SPAN,
         "columns": ["GOC_ID", "VARIABLE_NAME", "1", "T"],
+    }
+
+
+def create_mandatory_actuals(
+    goc_names: list[str],
+    year: int,
+    output_path: str,
+) -> dict[str, Any]:
+    """Create a ``MANDATORY_ACTUALS`` workbook with three columns.
+
+    For each GoC and each cohort year (``year`` .. ``year - 15``) the
+    function emits 16 rows — one per VARIABLE_NAME, in the fixed order
+    of ``MANDATORY_ACTUALS_VARIABLE_NAMES``. Total rows per GoC:
+    ``ASTRA_COHORT_YEAR_SPAN * len(MANDATORY_ACTUALS_VARIABLE_NAMES)``.
+
+    Columns:
+    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator.
+    - ``VARIABLE_NAME``: one of the 16 fixed values, in order.
+    - ``1`` (literal integer header): always ``0``.
+
+    Overwrites the output file if it already exists.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "MANDATORY_ACTUALS"
+    ws.cell(row=1, column=1, value="GOC_ID")
+    ws.cell(row=1, column=2, value="VARIABLE_NAME")
+    ws.cell(row=1, column=3, value=1)
+
+    row = 2
+    for goc in goc_names:
+        for offset in range(ASTRA_COHORT_YEAR_SPAN):
+            cohort_year = year - offset
+            for variable_name in MANDATORY_ACTUALS_VARIABLE_NAMES:
+                ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
+                ws.cell(row=row, column=2, value=variable_name)
+                ws.cell(row=row, column=3, value=0)
+                row += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows": (
+            len(goc_names)
+            * ASTRA_COHORT_YEAR_SPAN
+            * len(MANDATORY_ACTUALS_VARIABLE_NAMES)
+        ),
+        "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
 
