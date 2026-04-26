@@ -1,8 +1,8 @@
 """Astra Input Builder page.
 
-Prepares the Astra input workbooks. Reuses the GoC list and the
-analysis year produced by the latest Sunrise run, so no duplicate
-input form is needed here.
+Prepares the Astra input workbooks. Independent of the Sunrise page —
+the user uploads the Ceded file and sets parameters here, and the Astra
+pipeline runs on those.
 """
 from __future__ import annotations
 
@@ -22,6 +22,13 @@ RUNS_DIR = ROOT / "runs"
 RUNS_DIR.mkdir(exist_ok=True)
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+ENTITIES: list[tuple[int, str]] = [
+    (14, "MPS"),
+    (6, "AAI"),
+    (11, "DIRECT ITALY"),
+    (19, "NOBIS"),
+]
 
 st.set_page_config(
     page_title="Astra Input Builder",
@@ -44,9 +51,7 @@ st.warning(
     "rules not yet defined; currently produced as empty placeholders.\n"
     "- `INCEPTION_FORWARD_RATES.xlsx` — the source input file (suffix and "
     "sheet) and the specific rates row to extract are still to be defined; "
-    "the output is not produced yet.\n\n"
-    "`NEW_BUSINESS_PPOS.xlsx` is fully wired and uses the GoC list + "
-    "analysis year from the last Sunrise run.",
+    "the output is not produced yet.",
     icon="🚧",
 )
 
@@ -57,37 +62,48 @@ uploaded = st.file_uploader(
     accept_multiple_files=True,
 )
 
-# Pull the GoC list and analysis year from session state (Sunrise sets them).
-goc_names: list[str] | None = st.session_state.get("sunrise_goc_names")
-year: int | None = st.session_state.get("sunrise_year")
-
-st.subheader("2. Parameters from Sunrise")
-sunrise_ready = bool(goc_names) and year is not None
-if sunrise_ready:
-    st.success(
-        f"Using **{len(goc_names)} GoC(s)** and analysis year **{year}** "
-        f"from the last Sunrise run."
+st.subheader("2. Analysis parameters")
+col_year, col_sem, col_type = st.columns(3)
+with col_year:
+    year = st.number_input(
+        "Year",
+        min_value=2000,
+        max_value=2100,
+        value=datetime.now().year,
+        step=1,
     )
-    with st.expander("Show GoC list"):
-        st.write(goc_names)
-else:
-    st.error(
-        "No Sunrise run found in this session. Open the **Sunrise** page, "
-        "run the pipeline, then come back here."
+with col_sem:
+    semester = st.radio(
+        "Semester",
+        options=[1, 2],
+        horizontal=True,
+        format_func=lambda s: f"H{s}",
     )
+with col_type:
+    business_type = st.radio(
+        "Business type",
+        options=["Diretto", "Ceduto"],
+        horizontal=True,
+    )
+entity = st.selectbox(
+    "Entity to analyze",
+    options=ENTITIES,
+    format_func=lambda e: f"{e[0]} — {e[1]}",
+)
 
 run_clicked = st.button(
     "▶ Run pipeline",
     type="primary",
-    disabled=not sunrise_ready,
+    disabled=not (uploaded and entity),
 )
-if run_clicked and sunrise_ready:
+if run_clicked and uploaded and entity:
+    entity_id, entity_name = entity
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     run_dir = RUNS_DIR / run_id
     inputs_dir = run_dir / "inputs"
     inputs_dir.mkdir(parents=True)
     input_paths: list[Path] = []
-    for f in uploaded or []:
+    for f in uploaded:
         p = inputs_dir / f.name
         p.write_bytes(f.getvalue())
         input_paths.append(p)
@@ -98,8 +114,10 @@ if run_clicked and sunrise_ready:
             outputs = run_astra_phase1(
                 input_paths=input_paths,
                 run_dir=run_dir,
-                goc_names=goc_names,
+                entity_id=entity_id,
+                entity_name=entity_name,
                 year=int(year),
+                semester=int(semester),
             )
             for out in outputs:
                 st.write(f"✅ → `{out.name}`")

@@ -142,14 +142,16 @@ def run_phase1(
 def run_astra_phase1(
     input_paths: list[Path],
     run_dir: Path,
-    goc_names: list[str],
+    entity_id: int,
+    entity_name: str,
     year: int,
+    semester: int,
 ) -> list[Path]:
     """Astra Phase 1.
 
-    Reuses the GoC list and analysis year produced by the Sunrise run
-    (passed in by the caller — typically read from session state).
-    Writes:
+    Picks the Ceded input file (suffix ``AAI_P&C_Ceded``) and extracts the
+    unique GoC names from column AA of sheet ``AAI_P&C_Ceded_H_NH``. Then
+    writes the Astra workbooks for analysis ``year``:
 
     - ``{run_dir}/NEW_BUSINESS_PPOS.xlsx`` — three columns
       (``GOC_ID``, ``VARIABLE_NAME``, ``1``); 16 rows per GoC across the
@@ -168,10 +170,14 @@ def run_astra_phase1(
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder
       (population rules TODO).
 
-    ``input_paths`` is accepted for symmetry with the eventual real OCI
-    implementation but is not consumed yet.
+    ``entity_id``, ``entity_name`` and ``semester`` are accepted for
+    symmetry with the Astra UI form but are not used by the current
+    transformations.
     """
-    del input_paths  # unused for now
+    del entity_id, entity_name, semester  # reserved for future skills
+
+    ceded_path = _find_file_by_suffix(input_paths, CEDED_SUFFIX)
+    goc_names = extract_unique_goc_names(str(ceded_path))["values"]
 
     new_business_path = run_dir / "NEW_BUSINESS_PPOS.xlsx"
     create_new_business_ppos(

@@ -202,12 +202,31 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     ]
 
 
+def _build_ceded_fixture_for_astra(path: Path, gocs: list[str]) -> None:
+    """Minimal Ceded fixture used by Astra tests."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "AAI_P&C_Ceded_H_NH"
+    ws.cell(row=1, column=27, value="GoC")
+    ws.cell(row=2, column=27, value="Line of Business")
+    for i, v in enumerate(gocs, start=3):
+        ws.cell(row=i, column=27, value=v)
+    wb.save(path)
+
+
 def test_run_astra_phase1_produces_six_workbooks(tmp_path: Path) -> None:
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded = inputs_dir / "1.1_2024.12.31_AAI_P&C_Ceded.xlsx"
+    _build_ceded_fixture_for_astra(ceded, ["IT05PABPPLE", "IT06ABCDE"])
+
     outputs = run_astra_phase1(
-        input_paths=[],
+        input_paths=[ceded],
         run_dir=tmp_path,
-        goc_names=["IT05PABPPLE", "IT06ABCDE"],
+        entity_id=6,
+        entity_name="AAI",
         year=2024,
+        semester=2,
     )
 
     assert outputs == [
@@ -267,3 +286,18 @@ def test_run_astra_phase1_produces_six_workbooks(tmp_path: Path) -> None:
         wb = openpyxl.load_workbook(p)
         assert len(wb.sheetnames) == 1
         assert list(wb[wb.sheetnames[0]].iter_rows(values_only=True)) == []
+
+
+def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:
+    other = tmp_path / "irrelevant.xlsx"
+    openpyxl.Workbook().save(other)
+
+    with pytest.raises(FileNotFoundError, match="AAI_P&C_Ceded"):
+        run_astra_phase1(
+            input_paths=[other],
+            run_dir=tmp_path,
+            entity_id=6,
+            entity_name="AAI",
+            year=2024,
+            semester=2,
+        )

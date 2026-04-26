@@ -122,12 +122,6 @@ with col_main:
                 for out in phase1_result["outputs"]:
                     st.write(f"✅ Phase 1 → `{out.name}`")
 
-                # Expose GoCs and analysis year for downstream pages
-                # (e.g. Astra reuses them without asking the user again).
-                st.session_state.sunrise_goc_names = phase1_result["goc_names"]
-                st.session_state.sunrise_year = phase1_result["year"]
-                st.session_state.sunrise_semester = phase1_result["semester"]
-
                 status.update(label="Pipeline complete", state="complete")
             except Exception as e:
                 status.update(label=f"Failed: {e}", state="error")
