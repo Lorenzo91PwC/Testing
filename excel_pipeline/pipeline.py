@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .skill import (
+    ASTRA_COHORT_YEAR_SPAN,
     create_coverage_unit,
     create_empty_workbook,
     create_mandatory_actuals,
@@ -24,6 +25,7 @@ from .skill import (
     create_payment_pattern,
     create_reinsurance,
     create_risk_adjustment,
+    extract_unique_goc_cohort_pairs,
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
@@ -149,26 +151,20 @@ def run_astra_phase1(
 ) -> list[Path]:
     """Astra Phase 1.
 
-    Picks the Ceded input file (suffix ``AAI_P&C_Ceded``) and extracts the
-    unique GoC names from column AA of sheet ``AAI_P&C_Ceded_H_NH``. Then
-    writes the Astra workbooks for analysis ``year``:
+    Reads the Ceded input file (suffix ``AAI_P&C_Ceded``): from sheet
+    ``AAI_P&C_Ceded_H_NH``, columns AA (GoC code) and AB (cohort year)
+    are joined into ``GOC_ID`` strings (e.g. ``IT05PABPPLE2024``) and
+    deduped. The resulting list is then capped to the 16-year window
+    ``[year - 15, year]`` — pairs outside that window are dropped.
 
-    - ``{run_dir}/NEW_BUSINESS_PPOS.xlsx`` — three columns
-      (``GOC_ID``, ``VARIABLE_NAME``, ``1``); 16 rows per GoC across the
-      cohort years ``year`` .. ``year - 15``.
-    - ``{run_dir}/COVERAGE_UNIT.xlsx`` — 102 columns
-      (``GOC_ID``, ``PROJECTION_PERIOD``, ``1``..``100``); same row
-      layout as NEW_BUSINESS_PPOS.
-    - ``{run_dir}/REINSURANCE.xlsx`` — four columns
-      (``GOC_ID``, ``VARIABLE_NAME``, ``1``, ``T``); 32 rows per GoC
-      (16 ``LOSSRECO_IFE_ALLOCATION`` then 16 ``LOSSRECO_CLOSING``).
-    - ``{run_dir}/MANDATORY_ACTUALS.xlsx`` — three columns
-      (``GOC_ID``, ``VARIABLE_NAME``, ``1``); 256 rows per GoC
-      (16 cohort years × 16 fixed variable names).
-    - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder
-      (population rules TODO).
-    - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder
-      (population rules TODO).
+    Writes:
+
+    - ``{run_dir}/NEW_BUSINESS_PPOS.xlsx`` — one row per kept pair.
+    - ``{run_dir}/COVERAGE_UNIT.xlsx`` — one row per kept pair.
+    - ``{run_dir}/REINSURANCE.xlsx`` — two variables × N pairs per GoC.
+    - ``{run_dir}/MANDATORY_ACTUALS.xlsx`` — 16 variables × N pairs per GoC.
+    - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder.
+    - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder.
 
     ``entity_id``, ``entity_name`` and ``semester`` are accepted for
     symmetry with the Astra UI form but are not used by the current
@@ -177,35 +173,23 @@ def run_astra_phase1(
     del entity_id, entity_name, semester  # reserved for future skills
 
     ceded_path = _find_file_by_suffix(input_paths, CEDED_SUFFIX)
-    goc_names = extract_unique_goc_names(str(ceded_path))["values"]
+    raw_pairs = extract_unique_goc_cohort_pairs(str(ceded_path))["pairs"]
+
+    # Cap at the 16-year window around the analysis year.
+    min_year = year - (ASTRA_COHORT_YEAR_SPAN - 1)
+    pairs = [p for p in raw_pairs if min_year <= p["year"] <= year]
 
     new_business_path = run_dir / "NEW_BUSINESS_PPOS.xlsx"
-    create_new_business_ppos(
-        goc_names=goc_names,
-        year=year,
-        output_path=str(new_business_path),
-    )
+    create_new_business_ppos(pairs=pairs, output_path=str(new_business_path))
 
     coverage_unit_path = run_dir / "COVERAGE_UNIT.xlsx"
-    create_coverage_unit(
-        goc_names=goc_names,
-        year=year,
-        output_path=str(coverage_unit_path),
-    )
+    create_coverage_unit(pairs=pairs, output_path=str(coverage_unit_path))
 
     reinsurance_path = run_dir / "REINSURANCE.xlsx"
-    create_reinsurance(
-        goc_names=goc_names,
-        year=year,
-        output_path=str(reinsurance_path),
-    )
+    create_reinsurance(pairs=pairs, output_path=str(reinsurance_path))
 
     mandatory_actuals_path = run_dir / "MANDATORY_ACTUALS.xlsx"
-    create_mandatory_actuals(
-        goc_names=goc_names,
-        year=year,
-        output_path=str(mandatory_actuals_path),
-    )
+    create_mandatory_actuals(pairs=pairs, output_path=str(mandatory_actuals_path))
 
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"

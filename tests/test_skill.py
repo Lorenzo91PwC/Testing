@@ -17,10 +17,16 @@ from excel_pipeline.skill import (
     create_payment_pattern,
     create_reinsurance,
     create_risk_adjustment,
+    extract_unique_goc_cohort_pairs,
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
 )
+
+
+def _pair(goc: str, year: int) -> dict:
+    """Helper for tests — mirrors extract_unique_goc_cohort_pairs output."""
+    return {"goc_id": f"{goc}{year}", "goc": goc, "year": year}
 
 
 def _build_ceded_fixture(path: Path) -> None:
@@ -442,50 +448,78 @@ def test_create_empty_workbook(tmp_path: Path) -> None:
     assert list(ws.iter_rows(values_only=True)) == []
 
 
+def _build_ceded_with_year_fixture(path: Path, rows_data: list[tuple]) -> None:
+    """Ceded fixture with GoC name in column AA and cohort year in column AB.
+
+    `rows_data` is a list of (goc, year) tuples written from row 3 onward.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "AAI_P&C_Ceded_H_NH"
+    ws.cell(row=1, column=27, value="GoC")
+    ws.cell(row=1, column=28, value="Cohort Year")
+    ws.cell(row=2, column=27, value="Code")
+    ws.cell(row=2, column=28, value="Year")
+    for i, (goc, year) in enumerate(rows_data, start=3):
+        ws.cell(row=i, column=27, value=goc)
+        ws.cell(row=i, column=28, value=year)
+    wb.save(path)
+
+
+def test_extract_unique_goc_cohort_pairs(tmp_path: Path) -> None:
+    fixture = tmp_path / "ceded.xlsx"
+    _build_ceded_with_year_fixture(
+        fixture,
+        [
+            ("IT05PABPPLE", 2024),
+            ("IT05PABPPLE", 2023),
+            ("IT05PABPPLE", 2024),  # duplicate -> dropped
+            ("  IT05PABPPLE  ", 2022),  # stripped
+            ("IT06ABCDE", 2024),
+            (None, 2020),  # skipped (None GoC)
+            ("IT06ABCDE", None),  # skipped (None year)
+            ("", 2020),  # skipped (empty GoC)
+        ],
+    )
+
+    result = extract_unique_goc_cohort_pairs(str(fixture))
+
+    assert result["sheet"] == "AAI_P&C_Ceded_H_NH"
+    assert result["count"] == 4
+    assert result["pairs"] == [
+        {"goc_id": "IT05PABPPLE2024", "goc": "IT05PABPPLE", "year": 2024},
+        {"goc_id": "IT05PABPPLE2023", "goc": "IT05PABPPLE", "year": 2023},
+        {"goc_id": "IT05PABPPLE2022", "goc": "IT05PABPPLE", "year": 2022},
+        {"goc_id": "IT06ABCDE2024", "goc": "IT06ABCDE", "year": 2024},
+    ]
+
+
 def test_create_new_business_ppos(tmp_path: Path) -> None:
     output = tmp_path / "NEW_BUSINESS_PPOS.xlsx"
+    pairs = [_pair("IT05PABPPLE", 2024), _pair("IT05PABPPLE", 2023), _pair("IT06ABCDE", 2024)]
 
-    result = create_new_business_ppos(
-        goc_names=["IT05PABPPLE", "IT06ABCDE"],
-        year=2024,
-        output_path=str(output),
-    )
+    result = create_new_business_ppos(pairs=pairs, output_path=str(output))
 
     assert result == {
         "output_path": str(output),
-        "rows": 2 * 16,
+        "rows": 3,
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
     wb = openpyxl.load_workbook(output)
-    ws = wb["NEW_BUSINESS_PPOS"]
-    rows = list(ws.iter_rows(values_only=True))
-
-    # Header
-    assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
-
-    # First GoC: 16 rows from 2024 down to 2009
-    expected_first_goc = [
-        (f"IT05PABPPLE{2024 - i}", "CROSS_SUB_FASSCHNG", 0) for i in range(16)
+    rows = list(wb["NEW_BUSINESS_PPOS"].iter_rows(values_only=True))
+    assert rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1),
+        ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
+        ("IT05PABPPLE2023", "CROSS_SUB_FASSCHNG", 0),
+        ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0),
     ]
-    assert rows[1:17] == expected_first_goc
-
-    # Second GoC follows immediately
-    expected_second_goc = [
-        (f"IT06ABCDE{2024 - i}", "CROSS_SUB_FASSCHNG", 0) for i in range(16)
-    ]
-    assert rows[17:33] == expected_second_goc
-
-    # No extra rows
-    assert len(rows) == 33
 
 
-def test_create_new_business_ppos_empty_goc_list(tmp_path: Path) -> None:
+def test_create_new_business_ppos_empty_pairs(tmp_path: Path) -> None:
     output = tmp_path / "NEW_BUSINESS_PPOS.xlsx"
 
-    result = create_new_business_ppos(
-        goc_names=[], year=2024, output_path=str(output),
-    )
+    result = create_new_business_ppos(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
     wb = openpyxl.load_workbook(output)
@@ -495,102 +529,60 @@ def test_create_new_business_ppos_empty_goc_list(tmp_path: Path) -> None:
 
 def test_create_coverage_unit(tmp_path: Path) -> None:
     output = tmp_path / "COVERAGE_UNIT.xlsx"
+    pairs = [_pair("IT05PABPPLE", 2024), _pair("IT06ABCDE", 2024)]
 
-    result = create_coverage_unit(
-        goc_names=["IT05PABPPLE", "IT06ABCDE"],
-        year=2024,
-        output_path=str(output),
-    )
+    result = create_coverage_unit(pairs=pairs, output_path=str(output))
 
     expected_columns = ["GOC_ID", "PROJECTION_PERIOD"] + [str(i) for i in range(1, 101)]
     assert result == {
         "output_path": str(output),
-        "rows": 2 * 16,
+        "rows": 2,
         "columns": expected_columns,
     }
 
     wb = openpyxl.load_workbook(output)
-    ws = wb["COVERAGE_UNIT"]
-    rows = list(ws.iter_rows(values_only=True))
-
-    # Header: GOC_ID, PROJECTION_PERIOD, then integers 1..100
-    assert rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
-
-    # 1 + 32 rows total (2 GoCs x 16 cohort years)
-    assert len(rows) == 1 + 32
-
-    # First data row: first GoC at the analysis year, all zeros
-    assert rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
-
-    # 16th cohort row of first GoC: year - 15 = 2009
-    assert rows[16] == ("IT05PABPPLE2009", 1) + (0,) * 100
-
-    # First data row for the second GoC starts immediately after
-    assert rows[17] == ("IT06ABCDE2024", 1) + (0,) * 100
-
-
-def test_create_coverage_unit_empty_goc_list(tmp_path: Path) -> None:
-    output = tmp_path / "COVERAGE_UNIT.xlsx"
-
-    result = create_coverage_unit(
-        goc_names=[], year=2024, output_path=str(output),
-    )
-
-    assert result["rows"] == 0
-    wb = openpyxl.load_workbook(output)
     rows = list(wb["COVERAGE_UNIT"].iter_rows(values_only=True))
-    # Header only
-    assert len(rows) == 1
     assert rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
+    assert rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
+    assert rows[2] == ("IT06ABCDE2024", 1) + (0,) * 100
+    assert len(rows) == 3
 
 
 def test_create_reinsurance(tmp_path: Path) -> None:
     output = tmp_path / "REINSURANCE.xlsx"
+    pairs = [
+        _pair("IT05PABPPLE", 2024),
+        _pair("IT05PABPPLE", 2023),
+        _pair("IT06ABCDE", 2024),
+    ]
 
-    result = create_reinsurance(
-        goc_names=["IT05PABPPLE", "IT06ABCDE"],
-        year=2024,
-        output_path=str(output),
-    )
+    result = create_reinsurance(pairs=pairs, output_path=str(output))
 
     assert result == {
         "output_path": str(output),
-        "rows": 2 * 2 * 16,
+        "rows": 3 * 2,
         "columns": ["GOC_ID", "VARIABLE_NAME", "1", "T"],
     }
 
     wb = openpyxl.load_workbook(output)
     rows = list(wb["REINSURANCE"].iter_rows(values_only=True))
-
-    assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1, "T")
-    # 1 header + (2 GoCs * 2 variables * 16 cohorts)
-    assert len(rows) == 1 + 2 * 2 * 16
-
-    # First GoC, first variable: 16 cohort rows from 2024 down to 2009
-    expected_first_block = [
-        (f"IT05PABPPLE{2024 - i}", "LOSSRECO_IFE_ALLOCATION", 0, 2024 - i)
-        for i in range(16)
+    assert rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1, "T"),
+        # First GoC: 2 IFE rows (one per pair of that GoC), then 2 CLOSING rows
+        ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
+        ("IT05PABPPLE2023", "LOSSRECO_IFE_ALLOCATION", 0, 2023),
+        ("IT05PABPPLE2024", "LOSSRECO_CLOSING", 0, 2024),
+        ("IT05PABPPLE2023", "LOSSRECO_CLOSING", 0, 2023),
+        # Second GoC: 1 IFE then 1 CLOSING
+        ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
+        ("IT06ABCDE2024", "LOSSRECO_CLOSING", 0, 2024),
     ]
-    assert rows[1:17] == expected_first_block
-
-    # First GoC, second variable: same cohort years, LOSSRECO_CLOSING
-    expected_second_block = [
-        (f"IT05PABPPLE{2024 - i}", "LOSSRECO_CLOSING", 0, 2024 - i)
-        for i in range(16)
-    ]
-    assert rows[17:33] == expected_second_block
-
-    # Second GoC starts at row 33 (index from 1)
-    assert rows[33] == ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024)
-    assert rows[49] == ("IT06ABCDE2024", "LOSSRECO_CLOSING", 0, 2024)
 
 
-def test_create_reinsurance_empty_goc_list(tmp_path: Path) -> None:
+def test_create_reinsurance_empty_pairs(tmp_path: Path) -> None:
     output = tmp_path / "REINSURANCE.xlsx"
 
-    result = create_reinsurance(
-        goc_names=[], year=2024, output_path=str(output),
-    )
+    result = create_reinsurance(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
     wb = openpyxl.load_workbook(output)
@@ -601,58 +593,48 @@ def test_create_reinsurance_empty_goc_list(tmp_path: Path) -> None:
 def test_create_mandatory_actuals(tmp_path: Path) -> None:
     output = tmp_path / "MANDATORY_ACTUALS.xlsx"
     assert len(MANDATORY_ACTUALS_VARIABLE_NAMES) == 16  # guard the spec
+    pairs = [
+        _pair("IT05PABPPLE", 2024),
+        _pair("IT05PABPPLE", 2023),
+        _pair("IT06ABCDE", 2024),
+    ]
 
-    result = create_mandatory_actuals(
-        goc_names=["IT05PABPPLE", "IT06ABCDE"],
-        year=2024,
-        output_path=str(output),
-    )
+    result = create_mandatory_actuals(pairs=pairs, output_path=str(output))
 
     assert result == {
         "output_path": str(output),
-        "rows": 2 * 16 * 16,
+        "rows": 3 * 16,
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
     wb = openpyxl.load_workbook(output)
     rows = list(wb["MANDATORY_ACTUALS"].iter_rows(values_only=True))
-
     assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
-    # 1 header + (2 GoCs * 16 cohort years * 16 variables)
-    assert len(rows) == 1 + 2 * 16 * 16
+    assert len(rows) == 1 + 3 * 16
 
-    # First (GoC, year) block: all 16 variables for IT05PABPPLE2024
-    expected_first_block = [
+    # First pair (IT05PABPPLE2024): 16 variables in order
+    expected_first = [
         ("IT05PABPPLE2024", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
     ]
-    assert rows[1:17] == expected_first_block
+    assert rows[1:17] == expected_first
 
-    # Second (GoC, year) block: all 16 variables for IT05PABPPLE2023
-    expected_second_block = [
+    # Second pair (IT05PABPPLE2023): 16 variables in order
+    expected_second = [
         ("IT05PABPPLE2023", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
     ]
-    assert rows[17:33] == expected_second_block
+    assert rows[17:33] == expected_second
 
-    # Last cohort row of first GoC is at year 2009
-    last_first_goc_block = [
-        ("IT05PABPPLE2009", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
+    # Third pair (IT06ABCDE2024): 16 variables in order
+    expected_third = [
+        ("IT06ABCDE2024", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
     ]
-    assert rows[1 + 15 * 16 : 1 + 16 * 16] == last_first_goc_block
-
-    # Second GoC starts immediately after — index 1 + 16 * 16 = 257
-    assert rows[1 + 16 * 16] == (
-        "IT06ABCDE2024",
-        MANDATORY_ACTUALS_VARIABLE_NAMES[0],
-        0,
-    )
+    assert rows[33:49] == expected_third
 
 
-def test_create_mandatory_actuals_empty_goc_list(tmp_path: Path) -> None:
+def test_create_mandatory_actuals_empty_pairs(tmp_path: Path) -> None:
     output = tmp_path / "MANDATORY_ACTUALS.xlsx"
 
-    result = create_mandatory_actuals(
-        goc_names=[], year=2024, output_path=str(output),
-    )
+    result = create_mandatory_actuals(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
     wb = openpyxl.load_workbook(output)

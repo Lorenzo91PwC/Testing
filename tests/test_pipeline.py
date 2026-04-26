@@ -202,23 +202,35 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     ]
 
 
-def _build_ceded_fixture_for_astra(path: Path, gocs: list[str]) -> None:
-    """Minimal Ceded fixture used by Astra tests."""
+def _build_ceded_with_pairs_fixture(
+    path: Path, rows_data: list[tuple[str | None, int | None]]
+) -> None:
+    """Ceded fixture with GoC names in column AA and cohort years in column AB."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "AAI_P&C_Ceded_H_NH"
     ws.cell(row=1, column=27, value="GoC")
-    ws.cell(row=2, column=27, value="Line of Business")
-    for i, v in enumerate(gocs, start=3):
-        ws.cell(row=i, column=27, value=v)
+    ws.cell(row=1, column=28, value="Cohort Year")
+    ws.cell(row=2, column=27, value="Code")
+    ws.cell(row=2, column=28, value="Year")
+    for i, (goc, year) in enumerate(rows_data, start=3):
+        ws.cell(row=i, column=27, value=goc)
+        ws.cell(row=i, column=28, value=year)
     wb.save(path)
 
 
-def test_run_astra_phase1_produces_six_workbooks(tmp_path: Path) -> None:
+def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
     ceded = inputs_dir / "1.1_2024.12.31_AAI_P&C_Ceded.xlsx"
-    _build_ceded_fixture_for_astra(ceded, ["IT05PABPPLE", "IT06ABCDE"])
+    _build_ceded_with_pairs_fixture(
+        ceded,
+        [
+            ("IT05PABPPLE", 2024),
+            ("IT05PABPPLE", 2023),
+            ("IT06ABCDE", 2024),
+        ],
+    )
 
     outputs = run_astra_phase1(
         input_paths=[ceded],
@@ -240,52 +252,85 @@ def test_run_astra_phase1_produces_six_workbooks(tmp_path: Path) -> None:
     for p in outputs:
         assert p.exists()
 
-    # NEW_BUSINESS_PPOS: 16 rows per GoC + 1 header row
+    # NEW_BUSINESS_PPOS: one row per pair (3 pairs in fixture)
     nb_rows = list(
         openpyxl.load_workbook(outputs[0])["NEW_BUSINESS_PPOS"].iter_rows(values_only=True)
     )
-    assert nb_rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
-    assert len(nb_rows) == 1 + 2 * 16
-    assert nb_rows[1] == ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0)
-    assert nb_rows[16] == ("IT05PABPPLE2009", "CROSS_SUB_FASSCHNG", 0)
-    assert nb_rows[17] == ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0)
+    assert nb_rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1),
+        ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
+        ("IT05PABPPLE2023", "CROSS_SUB_FASSCHNG", 0),
+        ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0),
+    ]
 
-    # COVERAGE_UNIT: 102 columns, same row layout
+    # COVERAGE_UNIT: 1 header + 3 pair rows
     cu_rows = list(
         openpyxl.load_workbook(outputs[1])["COVERAGE_UNIT"].iter_rows(values_only=True)
     )
-    assert cu_rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
-    assert len(cu_rows) == 1 + 2 * 16
+    assert len(cu_rows) == 1 + 3
     assert cu_rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
-    assert cu_rows[17] == ("IT06ABCDE2024", 1) + (0,) * 100
+    assert cu_rows[3] == ("IT06ABCDE2024", 1) + (0,) * 100
 
-    # REINSURANCE: 32 rows per GoC + header. Per GoC: 16 IFE then 16 CLOSING.
+    # REINSURANCE: per GoC, all IFE rows then all CLOSING rows
     rein_rows = list(
         openpyxl.load_workbook(outputs[2])["REINSURANCE"].iter_rows(values_only=True)
     )
-    assert rein_rows[0] == ("GOC_ID", "VARIABLE_NAME", 1, "T")
-    assert len(rein_rows) == 1 + 2 * 32
-    assert rein_rows[1] == ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024)
-    assert rein_rows[17] == ("IT05PABPPLE2024", "LOSSRECO_CLOSING", 0, 2024)
-    assert rein_rows[33] == ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024)
+    assert rein_rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1, "T"),
+        ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
+        ("IT05PABPPLE2023", "LOSSRECO_IFE_ALLOCATION", 0, 2023),
+        ("IT05PABPPLE2024", "LOSSRECO_CLOSING", 0, 2024),
+        ("IT05PABPPLE2023", "LOSSRECO_CLOSING", 0, 2023),
+        ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
+        ("IT06ABCDE2024", "LOSSRECO_CLOSING", 0, 2024),
+    ]
 
-    # MANDATORY_ACTUALS: 256 rows per GoC + header.
+    # MANDATORY_ACTUALS: 1 header + (3 pairs * 16 variables) = 49 rows
     ma_rows = list(
         openpyxl.load_workbook(outputs[3])["MANDATORY_ACTUALS"].iter_rows(values_only=True)
     )
-    assert ma_rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
-    assert len(ma_rows) == 1 + 2 * 16 * 16
+    assert len(ma_rows) == 1 + 3 * 16
     assert ma_rows[1] == ("IT05PABPPLE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
-    # Last variable of first cohort year is at row index 16 (1 header + 16 vars)
-    assert ma_rows[16] == ("IT05PABPPLE2024", "THEORETICAL_PREMIUM_DERECOGNITION_LIC", 0)
-    # Second cohort year starts at row index 17
+    # Second pair starts at row 17
     assert ma_rows[17] == ("IT05PABPPLE2023", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
+    assert ma_rows[33] == ("IT06ABCDE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
 
-    # OCI files are still empty placeholders
-    for p in outputs[4:]:
-        wb = openpyxl.load_workbook(p)
-        assert len(wb.sheetnames) == 1
-        assert list(wb[wb.sheetnames[0]].iter_rows(values_only=True)) == []
+
+def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
+    """Pairs outside [year-15, year] are dropped before generation."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded = inputs_dir / "1.1_2024.12.31_AAI_P&C_Ceded.xlsx"
+    _build_ceded_with_pairs_fixture(
+        ceded,
+        [
+            ("IT05PABPPLE", 2024),  # kept (= year)
+            ("IT05PABPPLE", 2009),  # kept (= year - 15)
+            ("IT05PABPPLE", 2008),  # dropped (year - 16)
+            ("IT05PABPPLE", 2030),  # dropped (> year)
+            ("IT06ABCDE", 2020),    # kept (within window)
+        ],
+    )
+
+    outputs = run_astra_phase1(
+        input_paths=[ceded],
+        run_dir=tmp_path,
+        entity_id=6,
+        entity_name="AAI",
+        year=2024,
+        semester=2,
+    )
+
+    # Only 3 of the 5 pairs survive the filter
+    nb_rows = list(
+        openpyxl.load_workbook(outputs[0])["NEW_BUSINESS_PPOS"].iter_rows(values_only=True)
+    )
+    assert nb_rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1),
+        ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
+        ("IT05PABPPLE2009", "CROSS_SUB_FASSCHNG", 0),
+        ("IT06ABCDE2020", "CROSS_SUB_FASSCHNG", 0),
+    ]
 
 
 def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:

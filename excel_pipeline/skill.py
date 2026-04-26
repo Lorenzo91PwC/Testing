@@ -15,6 +15,7 @@ Adding a new transformation (checklist):
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -124,6 +125,53 @@ def extract_unique_goc_names(
         "count": len(seen),
         "values": seen,
     }
+
+
+def extract_unique_goc_cohort_pairs(
+    path: str,
+    sheet: str = "AAI_P&C_Ceded_H_NH",
+    goc_column: str = "AA",
+    year_column: str = "AB",
+    start_row: int = 3,
+) -> dict[str, Any]:
+    """Return unique (GoC, cohort_year) pairs from a Ceded workbook.
+
+    For each row from ``start_row`` onward, reads ``goc_column`` (the
+    GoC name, e.g. ``IT05PABPPLE``) and ``year_column`` (the cohort year
+    as an integer, e.g. ``2024``), concatenates them into a ``GOC_ID``
+    (e.g. ``IT05PABPPLE2024``), and dedupes on the joined identifier
+    preserving first occurrence. Whitespace is stripped, empty cells
+    and rows where the year cannot be coerced to int are skipped. Read-
+    only and idempotent (uses ``data_only=True`` so cached formula
+    values are returned instead of formula strings).
+
+    Returns ``{"sheet": ..., "count": ..., "pairs": [{"goc_id", "goc",
+    "year"}, ...]}``.
+    """
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb[sheet]
+    goc_idx = column_index_from_string(goc_column)
+    year_idx = column_index_from_string(year_column)
+    seen: set[str] = set()
+    pairs: list[dict[str, Any]] = []
+    for r in range(start_row, ws.max_row + 1):
+        goc_v = ws.cell(row=r, column=goc_idx).value
+        year_v = ws.cell(row=r, column=year_idx).value
+        if goc_v is None or year_v is None:
+            continue
+        goc = str(goc_v).strip()
+        if not goc:
+            continue
+        try:
+            year = int(year_v)
+        except (TypeError, ValueError):
+            continue
+        goc_id = f"{goc}{year}"
+        if goc_id in seen:
+            continue
+        seen.add(goc_id)
+        pairs.append({"goc_id": goc_id, "goc": goc, "year": year})
+    return {"sheet": sheet, "count": len(pairs), "pairs": pairs}
 
 
 def create_mp_lob(
@@ -435,19 +483,17 @@ COVERAGE_UNIT_PROJECTION_COLUMN_COUNT = 100
 
 
 def create_new_business_ppos(
-    goc_names: list[str],
-    year: int,
+    pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
     """Create a ``NEW_BUSINESS_PPOS`` workbook with three columns.
 
-    For each GoC the function emits 16 rows — one per cohort year,
-    starting at the analysis ``year`` and stepping back through 15
-    earlier years (``year``, ``year - 1``, ..., ``year - 15``).
+    One row per ``(goc, cohort_year)`` pair, in pair order. Pairs come
+    from ``extract_unique_goc_cohort_pairs`` and are typically already
+    filtered to the analysis window by the pipeline.
 
     Columns:
-    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator
-      (e.g. ``IT05PABPPLE2024``).
+    - ``GOC_ID``: ``pair['goc_id']`` (e.g. ``IT05PABPPLE2024``).
     - ``VARIABLE_NAME``: always ``'CROSS_SUB_FASSCHNG'``.
     - ``1`` (literal integer header): always ``0``.
 
@@ -460,35 +506,29 @@ def create_new_business_ppos(
     ws.cell(row=1, column=2, value="VARIABLE_NAME")
     ws.cell(row=1, column=3, value=1)
 
-    row = 2
-    for goc in goc_names:
-        for offset in range(ASTRA_COHORT_YEAR_SPAN):
-            cohort_year = year - offset
-            ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
-            ws.cell(row=row, column=2, value="CROSS_SUB_FASSCHNG")
-            ws.cell(row=row, column=3, value=0)
-            row += 1
+    for r, pair in enumerate(pairs, start=2):
+        ws.cell(row=r, column=1, value=pair["goc_id"])
+        ws.cell(row=r, column=2, value="CROSS_SUB_FASSCHNG")
+        ws.cell(row=r, column=3, value=0)
 
     save_workbook(wb, output_path)
     return {
         "output_path": output_path,
-        "rows": len(goc_names) * ASTRA_COHORT_YEAR_SPAN,
+        "rows": len(pairs),
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
 
 def create_coverage_unit(
-    goc_names: list[str],
-    year: int,
+    pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
     """Create a ``COVERAGE_UNIT`` workbook with 102 columns.
 
-    Same row layout as ``NEW_BUSINESS_PPOS``: for each GoC the function
-    emits 16 cohort rows from ``year`` down to ``year - 15``.
+    One row per ``(goc, cohort_year)`` pair, in pair order.
 
     Columns:
-    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator.
+    - ``GOC_ID``: ``pair['goc_id']``.
     - ``PROJECTION_PERIOD``: always ``1``.
     - ``1``, ``2``, ..., ``100`` (integer headers): always ``0``.
 
@@ -502,20 +542,16 @@ def create_coverage_unit(
     for i in range(1, COVERAGE_UNIT_PROJECTION_COLUMN_COUNT + 1):
         ws.cell(row=1, column=2 + i, value=i)
 
-    row = 2
-    for goc in goc_names:
-        for offset in range(ASTRA_COHORT_YEAR_SPAN):
-            cohort_year = year - offset
-            ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
-            ws.cell(row=row, column=2, value=1)
-            for i in range(COVERAGE_UNIT_PROJECTION_COLUMN_COUNT):
-                ws.cell(row=row, column=3 + i, value=0)
-            row += 1
+    for r, pair in enumerate(pairs, start=2):
+        ws.cell(row=r, column=1, value=pair["goc_id"])
+        ws.cell(row=r, column=2, value=1)
+        for i in range(COVERAGE_UNIT_PROJECTION_COLUMN_COUNT):
+            ws.cell(row=r, column=3 + i, value=0)
 
     save_workbook(wb, output_path)
     return {
         "output_path": output_path,
-        "rows": len(goc_names) * ASTRA_COHORT_YEAR_SPAN,
+        "rows": len(pairs),
         "columns": ["GOC_ID", "PROJECTION_PERIOD"]
         + [str(i) for i in range(1, COVERAGE_UNIT_PROJECTION_COLUMN_COUNT + 1)],
     }
@@ -544,25 +580,27 @@ MANDATORY_ACTUALS_VARIABLE_NAMES = [
 
 
 def create_reinsurance(
-    goc_names: list[str],
-    year: int,
+    pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
     """Create a ``REINSURANCE`` workbook with four columns.
 
-    For each GoC the function emits ``2 * ASTRA_COHORT_YEAR_SPAN`` rows:
-    first all 16 ``LOSSRECO_IFE_ALLOCATION`` rows for the cohort years
-    ``year`` .. ``year - 15``, then the 16 ``LOSSRECO_CLOSING`` rows for
-    the same cohort years.
+    Pairs are grouped by GoC (preserving first-seen order). For each
+    GoC, all ``LOSSRECO_IFE_ALLOCATION`` rows are emitted first (one
+    per pair of that GoC), followed by all ``LOSSRECO_CLOSING`` rows.
 
     Columns:
-    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator.
+    - ``GOC_ID``: ``pair['goc_id']``.
     - ``VARIABLE_NAME``: ``'LOSSRECO_IFE_ALLOCATION'`` or ``'LOSSRECO_CLOSING'``.
     - ``1`` (literal integer header): always ``0``.
-    - ``T``: the cohort year (integer) — same year embedded in ``GOC_ID``.
+    - ``T``: the cohort year from the pair.
 
     Overwrites the output file if it already exists.
     """
+    grouped: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+    for p in pairs:
+        grouped.setdefault(p["goc"], []).append(p)
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "REINSURANCE"
@@ -572,43 +610,44 @@ def create_reinsurance(
     ws.cell(row=1, column=4, value="T")
 
     row = 2
-    for goc in goc_names:
+    for goc_pairs in grouped.values():
         for variable_name in REINSURANCE_VARIABLE_NAMES:
-            for offset in range(ASTRA_COHORT_YEAR_SPAN):
-                cohort_year = year - offset
-                ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
+            for pair in goc_pairs:
+                ws.cell(row=row, column=1, value=pair["goc_id"])
                 ws.cell(row=row, column=2, value=variable_name)
                 ws.cell(row=row, column=3, value=0)
-                ws.cell(row=row, column=4, value=cohort_year)
+                ws.cell(row=row, column=4, value=pair["year"])
                 row += 1
 
     save_workbook(wb, output_path)
     return {
         "output_path": output_path,
-        "rows": len(goc_names) * len(REINSURANCE_VARIABLE_NAMES) * ASTRA_COHORT_YEAR_SPAN,
+        "rows": len(pairs) * len(REINSURANCE_VARIABLE_NAMES),
         "columns": ["GOC_ID", "VARIABLE_NAME", "1", "T"],
     }
 
 
 def create_mandatory_actuals(
-    goc_names: list[str],
-    year: int,
+    pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
     """Create a ``MANDATORY_ACTUALS`` workbook with three columns.
 
-    For each GoC and each cohort year (``year`` .. ``year - 15``) the
-    function emits 16 rows — one per VARIABLE_NAME, in the fixed order
-    of ``MANDATORY_ACTUALS_VARIABLE_NAMES``. Total rows per GoC:
-    ``ASTRA_COHORT_YEAR_SPAN * len(MANDATORY_ACTUALS_VARIABLE_NAMES)``.
+    Pairs are grouped by GoC (preserving first-seen order). For each
+    GoC, for each pair of that GoC, the 16 fixed VARIABLE_NAMEs are
+    emitted in order. Total rows: ``len(pairs) * 16``.
 
     Columns:
-    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator.
+    - ``GOC_ID``: ``pair['goc_id']``.
     - ``VARIABLE_NAME``: one of the 16 fixed values, in order.
     - ``1`` (literal integer header): always ``0``.
 
     Overwrites the output file if it already exists.
     """
+    grouped: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+    for p in pairs:
+        grouped.setdefault(p["goc"], []).append(p)
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "MANDATORY_ACTUALS"
@@ -617,11 +656,10 @@ def create_mandatory_actuals(
     ws.cell(row=1, column=3, value=1)
 
     row = 2
-    for goc in goc_names:
-        for offset in range(ASTRA_COHORT_YEAR_SPAN):
-            cohort_year = year - offset
+    for goc_pairs in grouped.values():
+        for pair in goc_pairs:
             for variable_name in MANDATORY_ACTUALS_VARIABLE_NAMES:
-                ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
+                ws.cell(row=row, column=1, value=pair["goc_id"])
                 ws.cell(row=row, column=2, value=variable_name)
                 ws.cell(row=row, column=3, value=0)
                 row += 1
@@ -629,11 +667,7 @@ def create_mandatory_actuals(
     save_workbook(wb, output_path)
     return {
         "output_path": output_path,
-        "rows": (
-            len(goc_names)
-            * ASTRA_COHORT_YEAR_SPAN
-            * len(MANDATORY_ACTUALS_VARIABLE_NAMES)
-        ),
+        "rows": len(pairs) * len(MANDATORY_ACTUALS_VARIABLE_NAMES),
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
