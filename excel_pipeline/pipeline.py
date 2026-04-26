@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .skill import (
+    create_coverage_unit,
     create_empty_workbook,
     create_mp_lob,
     create_mp_observation_year,
@@ -151,6 +152,9 @@ def run_astra_phase1(
     - ``{run_dir}/NEW_BUSINESS_PPOS.xlsx`` — three columns
       (``GOC_ID``, ``VARIABLE_NAME``, ``1``); 16 rows per GoC across the
       cohort years ``year`` .. ``year - 15``.
+    - ``{run_dir}/COVERAGE_UNIT.xlsx`` — 102 columns
+      (``GOC_ID``, ``PROJECTION_PERIOD``, ``1``..``100``); same row
+      layout as NEW_BUSINESS_PPOS.
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder
       (population rules TODO).
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder
@@ -168,9 +172,16 @@ def run_astra_phase1(
         output_path=str(new_business_path),
     )
 
+    coverage_unit_path = run_dir / "COVERAGE_UNIT.xlsx"
+    create_coverage_unit(
+        goc_names=goc_names,
+        year=year,
+        output_path=str(coverage_unit_path),
+    )
+
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
     create_empty_workbook(str(opening_path), sheet_name="OCI_OPTION_CF_OPENING")
 
-    return [new_business_path, closing_path, opening_path]
+    return [new_business_path, coverage_unit_path, closing_path, opening_path]

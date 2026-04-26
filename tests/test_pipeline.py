@@ -202,7 +202,7 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     ]
 
 
-def test_run_astra_phase1_produces_three_workbooks(tmp_path: Path) -> None:
+def test_run_astra_phase1_produces_four_workbooks(tmp_path: Path) -> None:
     outputs = run_astra_phase1(
         input_paths=[],
         run_dir=tmp_path,
@@ -212,6 +212,7 @@ def test_run_astra_phase1_produces_three_workbooks(tmp_path: Path) -> None:
 
     assert outputs == [
         tmp_path / "NEW_BUSINESS_PPOS.xlsx",
+        tmp_path / "COVERAGE_UNIT.xlsx",
         tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
         tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
     ]
@@ -228,8 +229,17 @@ def test_run_astra_phase1_produces_three_workbooks(tmp_path: Path) -> None:
     assert nb_rows[16] == ("IT05PABPPLE2009", "CROSS_SUB_FASSCHNG", 0)
     assert nb_rows[17] == ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0)
 
+    # COVERAGE_UNIT: 102 columns, same row layout
+    cu_rows = list(
+        openpyxl.load_workbook(outputs[1])["COVERAGE_UNIT"].iter_rows(values_only=True)
+    )
+    assert cu_rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
+    assert len(cu_rows) == 1 + 2 * 16
+    assert cu_rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
+    assert cu_rows[17] == ("IT06ABCDE2024", 1) + (0,) * 100
+
     # OCI files are still empty placeholders
-    for p in outputs[1:]:
+    for p in outputs[2:]:
         wb = openpyxl.load_workbook(p)
         assert len(wb.sheetnames) == 1
         assert list(wb[wb.sheetnames[0]].iter_rows(values_only=True)) == []

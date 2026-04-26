@@ -430,7 +430,8 @@ def create_empty_workbook(
     return {"output_path": output_path, "rows": 0, "columns": []}
 
 
-NEW_BUSINESS_PPOS_YEAR_SPAN = 16  # analysis year + 15 prior cohorts
+ASTRA_COHORT_YEAR_SPAN = 16  # analysis year + 15 prior cohorts; shared by all per-GoC cohort outputs
+COVERAGE_UNIT_PROJECTION_COLUMN_COUNT = 100
 
 
 def create_new_business_ppos(
@@ -461,7 +462,7 @@ def create_new_business_ppos(
 
     row = 2
     for goc in goc_names:
-        for offset in range(NEW_BUSINESS_PPOS_YEAR_SPAN):
+        for offset in range(ASTRA_COHORT_YEAR_SPAN):
             cohort_year = year - offset
             ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
             ws.cell(row=row, column=2, value="CROSS_SUB_FASSCHNG")
@@ -471,8 +472,52 @@ def create_new_business_ppos(
     save_workbook(wb, output_path)
     return {
         "output_path": output_path,
-        "rows": len(goc_names) * NEW_BUSINESS_PPOS_YEAR_SPAN,
+        "rows": len(goc_names) * ASTRA_COHORT_YEAR_SPAN,
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
+    }
+
+
+def create_coverage_unit(
+    goc_names: list[str],
+    year: int,
+    output_path: str,
+) -> dict[str, Any]:
+    """Create a ``COVERAGE_UNIT`` workbook with 102 columns.
+
+    Same row layout as ``NEW_BUSINESS_PPOS``: for each GoC the function
+    emits 16 cohort rows from ``year`` down to ``year - 15``.
+
+    Columns:
+    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator.
+    - ``PROJECTION_PERIOD``: always ``1``.
+    - ``1``, ``2``, ..., ``100`` (integer headers): always ``0``.
+
+    Overwrites the output file if it already exists.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "COVERAGE_UNIT"
+    ws.cell(row=1, column=1, value="GOC_ID")
+    ws.cell(row=1, column=2, value="PROJECTION_PERIOD")
+    for i in range(1, COVERAGE_UNIT_PROJECTION_COLUMN_COUNT + 1):
+        ws.cell(row=1, column=2 + i, value=i)
+
+    row = 2
+    for goc in goc_names:
+        for offset in range(ASTRA_COHORT_YEAR_SPAN):
+            cohort_year = year - offset
+            ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
+            ws.cell(row=row, column=2, value=1)
+            for i in range(COVERAGE_UNIT_PROJECTION_COLUMN_COUNT):
+                ws.cell(row=row, column=3 + i, value=0)
+            row += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows": len(goc_names) * ASTRA_COHORT_YEAR_SPAN,
+        "columns": ["GOC_ID", "PROJECTION_PERIOD"]
+        + [str(i) for i in range(1, COVERAGE_UNIT_PROJECTION_COLUMN_COUNT + 1)],
     }
 
 

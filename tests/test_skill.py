@@ -7,6 +7,7 @@ import openpyxl
 import pytest
 
 from excel_pipeline.skill import (
+    create_coverage_unit,
     create_empty_workbook,
     create_mp_lob,
     create_mp_observation_year,
@@ -487,3 +488,54 @@ def test_create_new_business_ppos_empty_goc_list(tmp_path: Path) -> None:
     wb = openpyxl.load_workbook(output)
     rows = list(wb["NEW_BUSINESS_PPOS"].iter_rows(values_only=True))
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]
+
+
+def test_create_coverage_unit(tmp_path: Path) -> None:
+    output = tmp_path / "COVERAGE_UNIT.xlsx"
+
+    result = create_coverage_unit(
+        goc_names=["IT05PABPPLE", "IT06ABCDE"],
+        year=2024,
+        output_path=str(output),
+    )
+
+    expected_columns = ["GOC_ID", "PROJECTION_PERIOD"] + [str(i) for i in range(1, 101)]
+    assert result == {
+        "output_path": str(output),
+        "rows": 2 * 16,
+        "columns": expected_columns,
+    }
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb["COVERAGE_UNIT"]
+    rows = list(ws.iter_rows(values_only=True))
+
+    # Header: GOC_ID, PROJECTION_PERIOD, then integers 1..100
+    assert rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
+
+    # 1 + 32 rows total (2 GoCs x 16 cohort years)
+    assert len(rows) == 1 + 32
+
+    # First data row: first GoC at the analysis year, all zeros
+    assert rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
+
+    # 16th cohort row of first GoC: year - 15 = 2009
+    assert rows[16] == ("IT05PABPPLE2009", 1) + (0,) * 100
+
+    # First data row for the second GoC starts immediately after
+    assert rows[17] == ("IT06ABCDE2024", 1) + (0,) * 100
+
+
+def test_create_coverage_unit_empty_goc_list(tmp_path: Path) -> None:
+    output = tmp_path / "COVERAGE_UNIT.xlsx"
+
+    result = create_coverage_unit(
+        goc_names=[], year=2024, output_path=str(output),
+    )
+
+    assert result["rows"] == 0
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["COVERAGE_UNIT"].iter_rows(values_only=True))
+    # Header only
+    assert len(rows) == 1
+    assert rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
