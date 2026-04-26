@@ -73,7 +73,7 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
     payments = inputs_dir / "1.2_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
     _build_payment_patterns_fixture(payments)
 
-    outputs = run_phase1(
+    result = run_phase1(
         input_paths=[ceded, payments],
         run_dir=tmp_path,
         entity_id=6,
@@ -82,6 +82,11 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         semester=2,
     )
 
+    assert result["goc_names"] == ["Motor", "Property", "Liability"]
+    assert result["year"] == 2025
+    assert result["semester"] == 2
+
+    outputs = result["outputs"]
     assert outputs == [
         tmp_path / "MP_LoB.xlsx",
         tmp_path / "MP_ObservationYear.xlsx",
@@ -168,7 +173,7 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     unrelated = inputs_dir / "notes.xlsx"
     openpyxl.Workbook().save(unrelated)
 
-    outputs = run_phase1(
+    result = run_phase1(
         input_paths=[unrelated, ceded, payments],
         run_dir=tmp_path,
         entity_id=14,
@@ -176,6 +181,7 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
         year=2025,
         semester=1,
     )
+    outputs = result["outputs"]
 
     mp_lob_rows = list(
         openpyxl.load_workbook(outputs[0])["MP_LoB"].iter_rows(values_only=True)
@@ -196,16 +202,34 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     ]
 
 
-def test_run_astra_phase1_produces_two_empty_workbooks(tmp_path: Path) -> None:
-    outputs = run_astra_phase1(input_paths=[], run_dir=tmp_path)
+def test_run_astra_phase1_produces_three_workbooks(tmp_path: Path) -> None:
+    outputs = run_astra_phase1(
+        input_paths=[],
+        run_dir=tmp_path,
+        goc_names=["IT05PABPPLE", "IT06ABCDE"],
+        year=2024,
+    )
 
     assert outputs == [
+        tmp_path / "NEW_BUSINESS_PPOS.xlsx",
         tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
         tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
     ]
     for p in outputs:
         assert p.exists()
+
+    # NEW_BUSINESS_PPOS: 16 rows per GoC + 1 header row
+    nb_rows = list(
+        openpyxl.load_workbook(outputs[0])["NEW_BUSINESS_PPOS"].iter_rows(values_only=True)
+    )
+    assert nb_rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
+    assert len(nb_rows) == 1 + 2 * 16
+    assert nb_rows[1] == ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0)
+    assert nb_rows[16] == ("IT05PABPPLE2009", "CROSS_SUB_FASSCHNG", 0)
+    assert nb_rows[17] == ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0)
+
+    # OCI files are still empty placeholders
+    for p in outputs[1:]:
         wb = openpyxl.load_workbook(p)
-        # One sheet, no data
         assert len(wb.sheetnames) == 1
         assert list(wb[wb.sheetnames[0]].iter_rows(values_only=True)) == []

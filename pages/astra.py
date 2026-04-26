@@ -1,7 +1,8 @@
 """Astra Input Builder page.
 
-Prepares the Astra input workbooks. Currently placeholder outputs only
-(empty files) — population rules are not yet defined.
+Prepares the Astra input workbooks. Reuses the GoC list and the
+analysis year produced by the latest Sunrise run, so no duplicate
+input form is needed here.
 """
 from __future__ import annotations
 
@@ -38,9 +39,9 @@ st.caption("Local pipeline that prepares Astra input files — data never leaves
 
 st.warning(
     "⚠️ **Reminder** — the population rules for `OCI_OPTION_CF_CLOSING.xlsx` "
-    "and `OCI_OPTION_CF_OPENING.xlsx` are not yet defined. Running the "
-    "pipeline produces empty placeholder files. Integrate the real rules "
-    "as soon as the specification is available.",
+    "and `OCI_OPTION_CF_OPENING.xlsx` are not yet defined. Those files are "
+    "still produced as empty placeholders. `NEW_BUSINESS_PPOS.xlsx` is "
+    "wired and uses the GoC list + analysis year from the last Sunrise run.",
     icon="🚧",
 )
 
@@ -51,8 +52,31 @@ uploaded = st.file_uploader(
     accept_multiple_files=True,
 )
 
-run_clicked = st.button("▶ Run pipeline", type="primary")
-if run_clicked:
+# Pull the GoC list and analysis year from session state (Sunrise sets them).
+goc_names: list[str] | None = st.session_state.get("sunrise_goc_names")
+year: int | None = st.session_state.get("sunrise_year")
+
+st.subheader("2. Parameters from Sunrise")
+sunrise_ready = bool(goc_names) and year is not None
+if sunrise_ready:
+    st.success(
+        f"Using **{len(goc_names)} GoC(s)** and analysis year **{year}** "
+        f"from the last Sunrise run."
+    )
+    with st.expander("Show GoC list"):
+        st.write(goc_names)
+else:
+    st.error(
+        "No Sunrise run found in this session. Open the **Sunrise** page, "
+        "run the pipeline, then come back here."
+    )
+
+run_clicked = st.button(
+    "▶ Run pipeline",
+    type="primary",
+    disabled=not sunrise_ready,
+)
+if run_clicked and sunrise_ready:
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     run_dir = RUNS_DIR / run_id
     inputs_dir = run_dir / "inputs"
@@ -66,9 +90,14 @@ if run_clicked:
 
     with st.status("Running Astra pipeline...", expanded=True) as status:
         try:
-            outputs = run_astra_phase1(input_paths=input_paths, run_dir=run_dir)
+            outputs = run_astra_phase1(
+                input_paths=input_paths,
+                run_dir=run_dir,
+                goc_names=goc_names,
+                year=int(year),
+            )
             for out in outputs:
-                st.write(f"✅ → `{out.name}` (empty placeholder)")
+                st.write(f"✅ → `{out.name}`")
             status.update(label="Pipeline complete", state="complete")
         except Exception as e:
             status.update(label=f"Failed: {e}", state="error")
@@ -76,7 +105,7 @@ if run_clicked:
 
 # Show files produced in the current run
 if st.session_state.astra_run_id:
-    st.subheader("2. Run outputs")
+    st.subheader("3. Run outputs")
     run_dir = RUNS_DIR / st.session_state.astra_run_id
     files = list_run_files(run_dir)
     if not files:

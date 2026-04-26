@@ -12,10 +12,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from typing import Any
+
 from .skill import (
     create_empty_workbook,
     create_mp_lob,
     create_mp_observation_year,
+    create_new_business_ppos,
     create_payment_pattern,
     create_risk_adjustment,
     extract_unique_goc_names,
@@ -50,7 +53,7 @@ def run_phase1(
     entity_name: str,
     year: int,
     semester: int,
-) -> list[Path]:
+) -> dict[str, Any]:
     """Phase 1: Ceded + Payment_Patterns -> four output workbooks.
 
     Picks the Ceded input file and extracts the unique GoC names from
@@ -67,7 +70,13 @@ def run_phase1(
     - ``{run_dir}/Payment_pattern.xlsx`` — 25 columns (``GoC``, ``Year``,
       ``0`` .. ``22``), two rows per GoC (``year`` and ``year-1``).
 
-    Returns the list of output paths in the order they were produced.
+    Returns a dict with:
+    - ``outputs``: the produced files in order;
+    - ``goc_names``: the unique GoC list extracted from the Ceded file;
+    - ``year`` and ``semester``: echoed for downstream consumers (e.g.
+      the Astra page reads them from session state to avoid a duplicate
+      input form).
+
     ``entity_name`` is accepted for symmetry with the UI call site but is
     not used by the current transformations.
     """
@@ -116,7 +125,12 @@ def run_phase1(
         output_path=str(payment_pattern_path),
     )
 
-    return [mp_lob_path, mp_obs_path, ra_path, payment_pattern_path]
+    return {
+        "outputs": [mp_lob_path, mp_obs_path, ra_path, payment_pattern_path],
+        "goc_names": goc_names,
+        "year": year,
+        "semester": semester,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -125,19 +139,38 @@ def run_phase1(
 def run_astra_phase1(
     input_paths: list[Path],
     run_dir: Path,
+    goc_names: list[str],
+    year: int,
 ) -> list[Path]:
-    """Astra Phase 1 — placeholder.
+    """Astra Phase 1.
 
-    TODO: replace with real population rules once defined. At the moment
-    this just writes two empty workbooks in ``run_dir``:
-    ``OCI_OPTION_CF_CLOSING.xlsx`` and ``OCI_OPTION_CF_OPENING.xlsx``.
-    ``input_paths`` is accepted for symmetry with a future real
+    Reuses the GoC list and analysis year produced by the Sunrise run
+    (passed in by the caller — typically read from session state).
+    Writes:
+
+    - ``{run_dir}/NEW_BUSINESS_PPOS.xlsx`` — three columns
+      (``GOC_ID``, ``VARIABLE_NAME``, ``1``); 16 rows per GoC across the
+      cohort years ``year`` .. ``year - 15``.
+    - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder
+      (population rules TODO).
+    - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder
+      (population rules TODO).
+
+    ``input_paths`` is accepted for symmetry with the eventual real OCI
     implementation but is not consumed yet.
     """
     del input_paths  # unused for now
+
+    new_business_path = run_dir / "NEW_BUSINESS_PPOS.xlsx"
+    create_new_business_ppos(
+        goc_names=goc_names,
+        year=year,
+        output_path=str(new_business_path),
+    )
 
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
     create_empty_workbook(str(opening_path), sheet_name="OCI_OPTION_CF_OPENING")
-    return [closing_path, opening_path]
+
+    return [new_business_path, closing_path, opening_path]
