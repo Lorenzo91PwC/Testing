@@ -29,10 +29,12 @@ from .skill import (
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
+    update_projection_parameters_entity,
 )
 
 CEDED_SUFFIX = "AAI_P&C_Ceded"
 PAYMENT_PATTERNS_SUFFIX = "Payment_Patterns_&_Risk_Adjustments"
+PROJECTION_PARAMETERS_SUFFIX = "PROJECTION_PARAMETERS_ENTITY"
 
 
 def _find_file_by_suffix(paths: list[Path], suffix: str) -> Path:
@@ -163,6 +165,9 @@ def run_astra_phase1(
     - ``{run_dir}/COVERAGE_UNIT.xlsx`` — one row per kept pair.
     - ``{run_dir}/REINSURANCE.xlsx`` — two variables × N pairs per GoC.
     - ``{run_dir}/MANDATORY_ACTUALS.xlsx`` — 16 variables × N pairs per GoC.
+    - ``{run_dir}/PROJECTION_PARAMETERS_ENTITY.xlsx`` — uploaded copy of
+      the Projection Parameters file with rule-based VALUE edits applied
+      based on ``year`` and ``semester``.
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder.
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder.
 
@@ -170,7 +175,7 @@ def run_astra_phase1(
     symmetry with the Astra UI form but are not used by the current
     transformations.
     """
-    del entity_id, entity_name, semester  # reserved for future skills
+    del entity_id, entity_name  # reserved for future skills (semester is used)
 
     ceded_path = _find_file_by_suffix(input_paths, CEDED_SUFFIX)
     raw_pairs = extract_unique_goc_cohort_pairs(str(ceded_path))["pairs"]
@@ -191,6 +196,17 @@ def run_astra_phase1(
     mandatory_actuals_path = run_dir / "MANDATORY_ACTUALS.xlsx"
     create_mandatory_actuals(pairs=pairs, output_path=str(mandatory_actuals_path))
 
+    projection_params_in = _find_file_by_suffix(
+        input_paths, PROJECTION_PARAMETERS_SUFFIX
+    )
+    projection_params_path = run_dir / "PROJECTION_PARAMETERS_ENTITY.xlsx"
+    update_projection_parameters_entity(
+        input_path=str(projection_params_in),
+        output_path=str(projection_params_path),
+        year=year,
+        semester=semester,
+    )
+
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
@@ -201,6 +217,7 @@ def run_astra_phase1(
         coverage_unit_path,
         reinsurance_path,
         mandatory_actuals_path,
+        projection_params_path,
         closing_path,
         opening_path,
     ]

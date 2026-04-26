@@ -219,6 +219,26 @@ def _build_ceded_with_pairs_fixture(
     wb.save(path)
 
 
+def _build_projection_parameters_fixture(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="PARAMETER")
+    ws.cell(row=1, column=2, value="VALUE")
+    rows = [
+        ("PROJECTED_PERIODS", 110),
+        ("CF_TIMESTEP", "SEMESTRIAL"),
+        ("REPORTING_MONTH", "12_DECEMBER"),
+        ("FX_OPENING_DATE", "1M25"),
+        ("FX_AVERAGE_DATE", "HY25"),
+        ("FX_CLOSING_DATE", "FY25"),
+        ("FX_REPORTING_DATE", 20251231),
+    ]
+    for i, (param, val) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1, value=param)
+        ws.cell(row=i, column=2, value=val)
+    wb.save(path)
+
+
 def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
@@ -231,9 +251,11 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
             ("IT06ABCDE", 2024),
         ],
     )
+    pp_params = inputs_dir / "1.4_2024.12.31_PROJECTION_PARAMETERS_ENTITY.xlsx"
+    _build_projection_parameters_fixture(pp_params)
 
     outputs = run_astra_phase1(
-        input_paths=[ceded],
+        input_paths=[ceded, pp_params],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",
@@ -246,6 +268,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         tmp_path / "COVERAGE_UNIT.xlsx",
         tmp_path / "REINSURANCE.xlsx",
         tmp_path / "MANDATORY_ACTUALS.xlsx",
+        tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx",
         tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
         tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
     ]
@@ -295,6 +318,21 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     assert ma_rows[17] == ("IT05PABPPLE2023", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
     assert ma_rows[33] == ("IT06ABCDE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
 
+    # PROJECTION_PARAMETERS_ENTITY: edits applied for H2 / 2024
+    pp_ws = openpyxl.load_workbook(outputs[4]).active
+    by_param = {
+        pp_ws.cell(row=r, column=1).value: pp_ws.cell(row=r, column=2).value
+        for r in range(2, pp_ws.max_row + 1)
+    }
+    assert by_param["CF_TIMESTEP"] == "YEARLY"
+    assert by_param["REPORTING_MONTH"] == "12_DECEMBER"
+    assert by_param["FX_OPENING_DATE"] == "1M24"
+    assert by_param["FX_AVERAGE_DATE"] == "HY24"
+    assert by_param["FX_CLOSING_DATE"] == "FY24"
+    assert by_param["FX_REPORTING_DATE"] == "20241231"
+    # Untouched
+    assert by_param["PROJECTED_PERIODS"] == 110
+
 
 def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     """Pairs outside [year-15, year] are dropped before generation."""
@@ -311,9 +349,11 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
             ("IT06ABCDE", 2020),    # kept (within window)
         ],
     )
+    pp_params = inputs_dir / "1.4_PROJECTION_PARAMETERS_ENTITY.xlsx"
+    _build_projection_parameters_fixture(pp_params)
 
     outputs = run_astra_phase1(
-        input_paths=[ceded],
+        input_paths=[ceded, pp_params],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",

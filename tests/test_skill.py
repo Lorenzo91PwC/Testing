@@ -21,6 +21,7 @@ from excel_pipeline.skill import (
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
+    update_projection_parameters_entity,
 )
 
 
@@ -640,3 +641,121 @@ def test_create_mandatory_actuals_empty_pairs(tmp_path: Path) -> None:
     wb = openpyxl.load_workbook(output)
     rows = list(wb["MANDATORY_ACTUALS"].iter_rows(values_only=True))
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]
+
+
+PROJECTION_PARAMS_INPUT_ROWS = [
+    ("PROJECTED_PERIODS", 110),
+    ("SCENARIO_TIMESTEP", "YEARLY"),
+    ("CF_TIMESTEP", "SEMESTRIAL"),
+    ("REPORTING_MONTH", "12_DECEMBER"),
+    ("PROJ_PERIOD_TIMESTEP", "YEARLY"),
+    ("COVERAGE_UNIT_FORMAT", "COVERAGE_UNIT"),
+    ("OCI_OPTION_APPROACH", "INDIRECT"),
+    ("OCI_OPTION_RA_PROXY", "1_PROP_PVFC"),
+    ("SCENARIO_MANAGEMENT", "CENTRAL"),
+    ("FX_OPENING_DATE", "1M25"),
+    ("FX_OPENING_RATE_TYPE", "YTD_VALUE"),
+    ("FX_AVERAGE_DATE", "HY25"),
+    ("FX_AVERAGE_RATE_TYPE", "YTD_VALUE"),
+    ("FX_CLOSING_DATE", "FY25"),
+    ("FX_CLOSING_RATE_TYPE", "YTD_VALUE"),
+    ("FX_REPORTING_DATE", 20251231),
+    ("FX_MANAGEMENT", "CENTRAL"),
+    ("ACTUARIAL_AOM_ACQ_CF", "SEPARATE_INPUT"),
+    ("OCI_OPTION_CF", "USE_EXISTING_INPUT"),
+]
+
+
+def _build_projection_parameters_fixture(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="PARAMETER")
+    ws.cell(row=1, column=2, value="VALUE")
+    for i, (param, val) in enumerate(PROJECTION_PARAMS_INPUT_ROWS, start=2):
+        ws.cell(row=i, column=1, value=param)
+        ws.cell(row=i, column=2, value=val)
+    wb.save(path)
+
+
+def test_update_projection_parameters_entity_h2_2025(tmp_path: Path) -> None:
+    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_projection_parameters_fixture(fixture)
+
+    result = update_projection_parameters_entity(
+        input_path=str(fixture),
+        output_path=str(output),
+        year=2025,
+        semester=2,
+    )
+
+    assert result["rows_updated"] == 6
+    assert set(result["parameters_updated"]) == {
+        "CF_TIMESTEP",
+        "REPORTING_MONTH",
+        "FX_OPENING_DATE",
+        "FX_AVERAGE_DATE",
+        "FX_CLOSING_DATE",
+        "FX_REPORTING_DATE",
+    }
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb.active
+    by_param = {
+        ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+        for r in range(2, ws.max_row + 1)
+    }
+    # Edits applied
+    assert by_param["CF_TIMESTEP"] == "YEARLY"
+    assert by_param["REPORTING_MONTH"] == "12_DECEMBER"
+    assert by_param["FX_OPENING_DATE"] == "1M25"
+    assert by_param["FX_AVERAGE_DATE"] == "HY25"
+    assert by_param["FX_CLOSING_DATE"] == "FY25"
+    assert by_param["FX_REPORTING_DATE"] == "20251231"
+    # Unchanged values
+    assert by_param["PROJECTED_PERIODS"] == 110
+    assert by_param["SCENARIO_TIMESTEP"] == "YEARLY"
+    assert by_param["FX_MANAGEMENT"] == "CENTRAL"
+    assert by_param["OCI_OPTION_CF"] == "USE_EXISTING_INPUT"
+    # Header preserved
+    assert ws.cell(row=1, column=1).value == "PARAMETER"
+    assert ws.cell(row=1, column=2).value == "VALUE"
+
+
+def test_update_projection_parameters_entity_h1_2025(tmp_path: Path) -> None:
+    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_projection_parameters_fixture(fixture)
+
+    update_projection_parameters_entity(
+        input_path=str(fixture),
+        output_path=str(output),
+        year=2025,
+        semester=1,
+    )
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb.active
+    by_param = {
+        ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+        for r in range(2, ws.max_row + 1)
+    }
+    assert by_param["REPORTING_MONTH"] == "6_JUNE"
+    assert by_param["FX_AVERAGE_DATE"] == "Q125"
+    assert by_param["FX_CLOSING_DATE"] == "HY25"
+    assert by_param["FX_REPORTING_DATE"] == "20250630"
+    assert by_param["FX_OPENING_DATE"] == "1M25"
+    assert by_param["CF_TIMESTEP"] == "YEARLY"
+
+
+def test_update_projection_parameters_entity_invalid_semester(tmp_path: Path) -> None:
+    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx"
+    _build_projection_parameters_fixture(fixture)
+
+    with pytest.raises(ValueError, match="semester must be 1 or 2"):
+        update_projection_parameters_entity(
+            input_path=str(fixture),
+            output_path=str(tmp_path / "out.xlsx"),
+            year=2025,
+            semester=3,
+        )

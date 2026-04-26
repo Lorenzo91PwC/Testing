@@ -462,6 +462,79 @@ def create_payment_pattern(
     }
 
 
+def update_projection_parameters_entity(
+    input_path: str,
+    output_path: str,
+    year: int,
+    semester: int,
+) -> dict[str, Any]:
+    """Apply rule-based edits to PROJECTION_PARAMETERS_ENTITY.xlsx.
+
+    The input has two columns (``PARAMETER``, ``VALUE``) plus a header
+    row. The function rewrites a fixed set of VALUE cells based on the
+    analysis ``year`` and ``semester`` (1 = H1 = June, 2 = H2 = December),
+    then saves the workbook to ``output_path``. Other rows and the
+    workbook structure are preserved.
+
+    Edits applied (parameter -> new value):
+
+    - ``CF_TIMESTEP`` -> ``'YEARLY'``
+    - ``REPORTING_MONTH`` -> ``'{month_num}_{MONTH_NAME}'``
+      (``6_JUNE`` for H1, ``12_DECEMBER`` for H2)
+    - ``FX_OPENING_DATE`` -> ``'1M{year_2d}'`` (e.g. ``1M25``)
+    - ``FX_AVERAGE_DATE`` -> ``'Q1{year_2d}'`` (H1) or ``'HY{year_2d}'`` (H2)
+    - ``FX_CLOSING_DATE`` -> ``'HY{year_2d}'`` (H1) or ``'FY{year_2d}'`` (H2)
+    - ``FX_REPORTING_DATE`` -> ``'{year}0630'`` (H1) or ``'{year}1231'`` (H2)
+
+    Parameters not present in the file are silently skipped.
+    """
+    if semester == 1:
+        month_num = 6
+        month_name = "JUNE"
+        avg_prefix = "Q1"
+        closing_prefix = "HY"
+        report_date = f"{year}0630"
+    elif semester == 2:
+        month_num = 12
+        month_name = "DECEMBER"
+        avg_prefix = "HY"
+        closing_prefix = "FY"
+        report_date = f"{year}1231"
+    else:
+        raise ValueError(f"semester must be 1 or 2, got {semester}")
+
+    year_2d = f"{year % 100:02d}"
+
+    updates: dict[str, Any] = {
+        "CF_TIMESTEP": "YEARLY",
+        "REPORTING_MONTH": f"{month_num}_{month_name}",
+        "FX_OPENING_DATE": f"1M{year_2d}",
+        "FX_AVERAGE_DATE": f"{avg_prefix}{year_2d}",
+        "FX_CLOSING_DATE": f"{closing_prefix}{year_2d}",
+        "FX_REPORTING_DATE": report_date,
+    }
+
+    wb = openpyxl.load_workbook(input_path)
+    ws = wb.active
+
+    applied: list[str] = []
+    for r in range(2, ws.max_row + 1):
+        param = ws.cell(row=r, column=1).value
+        if param is None:
+            continue
+        key = str(param).strip()
+        if key in updates:
+            ws.cell(row=r, column=2, value=updates[key])
+            applied.append(key)
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "parameters_updated": applied,
+        "rows_updated": len(applied),
+    }
+
+
 def create_empty_workbook(
     output_path: str,
     sheet_name: str = "Sheet1",
