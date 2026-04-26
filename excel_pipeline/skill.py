@@ -430,6 +430,52 @@ def create_empty_workbook(
     return {"output_path": output_path, "rows": 0, "columns": []}
 
 
+NEW_BUSINESS_PPOS_YEAR_SPAN = 16  # analysis year + 15 prior cohorts
+
+
+def create_new_business_ppos(
+    goc_names: list[str],
+    year: int,
+    output_path: str,
+) -> dict[str, Any]:
+    """Create a ``NEW_BUSINESS_PPOS`` workbook with three columns.
+
+    For each GoC the function emits 16 rows — one per cohort year,
+    starting at the analysis ``year`` and stepping back through 15
+    earlier years (``year``, ``year - 1``, ..., ``year - 15``).
+
+    Columns:
+    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator
+      (e.g. ``IT05PABPPLE2024``).
+    - ``VARIABLE_NAME``: always ``'CROSS_SUB_FASSCHNG'``.
+    - ``1`` (literal integer header): always ``0``.
+
+    Overwrites the output file if it already exists.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "NEW_BUSINESS_PPOS"
+    ws.cell(row=1, column=1, value="GOC_ID")
+    ws.cell(row=1, column=2, value="VARIABLE_NAME")
+    ws.cell(row=1, column=3, value=1)
+
+    row = 2
+    for goc in goc_names:
+        for offset in range(NEW_BUSINESS_PPOS_YEAR_SPAN):
+            cohort_year = year - offset
+            ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
+            ws.cell(row=row, column=2, value="CROSS_SUB_FASSCHNG")
+            ws.cell(row=row, column=3, value=0)
+            row += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows": len(goc_names) * NEW_BUSINESS_PPOS_YEAR_SPAN,
+        "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
+    }
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================

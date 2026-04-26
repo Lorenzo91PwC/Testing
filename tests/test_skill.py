@@ -10,6 +10,7 @@ from excel_pipeline.skill import (
     create_empty_workbook,
     create_mp_lob,
     create_mp_observation_year,
+    create_new_business_ppos,
     create_payment_pattern,
     create_risk_adjustment,
     extract_unique_goc_names,
@@ -435,3 +436,54 @@ def test_create_empty_workbook(tmp_path: Path) -> None:
     assert wb.sheetnames == ["Astra_Placeholder"]
     ws = wb["Astra_Placeholder"]
     assert list(ws.iter_rows(values_only=True)) == []
+
+
+def test_create_new_business_ppos(tmp_path: Path) -> None:
+    output = tmp_path / "NEW_BUSINESS_PPOS.xlsx"
+
+    result = create_new_business_ppos(
+        goc_names=["IT05PABPPLE", "IT06ABCDE"],
+        year=2024,
+        output_path=str(output),
+    )
+
+    assert result == {
+        "output_path": str(output),
+        "rows": 2 * 16,
+        "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
+    }
+
+    wb = openpyxl.load_workbook(output)
+    ws = wb["NEW_BUSINESS_PPOS"]
+    rows = list(ws.iter_rows(values_only=True))
+
+    # Header
+    assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
+
+    # First GoC: 16 rows from 2024 down to 2009
+    expected_first_goc = [
+        (f"IT05PABPPLE{2024 - i}", "CROSS_SUB_FASSCHNG", 0) for i in range(16)
+    ]
+    assert rows[1:17] == expected_first_goc
+
+    # Second GoC follows immediately
+    expected_second_goc = [
+        (f"IT06ABCDE{2024 - i}", "CROSS_SUB_FASSCHNG", 0) for i in range(16)
+    ]
+    assert rows[17:33] == expected_second_goc
+
+    # No extra rows
+    assert len(rows) == 33
+
+
+def test_create_new_business_ppos_empty_goc_list(tmp_path: Path) -> None:
+    output = tmp_path / "NEW_BUSINESS_PPOS.xlsx"
+
+    result = create_new_business_ppos(
+        goc_names=[], year=2024, output_path=str(output),
+    )
+
+    assert result["rows"] == 0
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["NEW_BUSINESS_PPOS"].iter_rows(values_only=True))
+    assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]
