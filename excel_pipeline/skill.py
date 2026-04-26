@@ -521,6 +521,56 @@ def create_coverage_unit(
     }
 
 
+REINSURANCE_VARIABLE_NAMES = ["LOSSRECO_IFE_ALLOCATION", "LOSSRECO_CLOSING"]
+
+
+def create_reinsurance(
+    goc_names: list[str],
+    year: int,
+    output_path: str,
+) -> dict[str, Any]:
+    """Create a ``REINSURANCE`` workbook with four columns.
+
+    For each GoC the function emits ``2 * ASTRA_COHORT_YEAR_SPAN`` rows:
+    first all 16 ``LOSSRECO_IFE_ALLOCATION`` rows for the cohort years
+    ``year`` .. ``year - 15``, then the 16 ``LOSSRECO_CLOSING`` rows for
+    the same cohort years.
+
+    Columns:
+    - ``GOC_ID``: ``'{goc}{cohort_year}'`` with no separator.
+    - ``VARIABLE_NAME``: ``'LOSSRECO_IFE_ALLOCATION'`` or ``'LOSSRECO_CLOSING'``.
+    - ``1`` (literal integer header): always ``0``.
+    - ``T``: the cohort year (integer) — same year embedded in ``GOC_ID``.
+
+    Overwrites the output file if it already exists.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "REINSURANCE"
+    ws.cell(row=1, column=1, value="GOC_ID")
+    ws.cell(row=1, column=2, value="VARIABLE_NAME")
+    ws.cell(row=1, column=3, value=1)
+    ws.cell(row=1, column=4, value="T")
+
+    row = 2
+    for goc in goc_names:
+        for variable_name in REINSURANCE_VARIABLE_NAMES:
+            for offset in range(ASTRA_COHORT_YEAR_SPAN):
+                cohort_year = year - offset
+                ws.cell(row=row, column=1, value=f"{goc}{cohort_year}")
+                ws.cell(row=row, column=2, value=variable_name)
+                ws.cell(row=row, column=3, value=0)
+                ws.cell(row=row, column=4, value=cohort_year)
+                row += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows": len(goc_names) * len(REINSURANCE_VARIABLE_NAMES) * ASTRA_COHORT_YEAR_SPAN,
+        "columns": ["GOC_ID", "VARIABLE_NAME", "1", "T"],
+    }
+
+
 # ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================

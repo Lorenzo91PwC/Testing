@@ -202,7 +202,7 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     ]
 
 
-def test_run_astra_phase1_produces_four_workbooks(tmp_path: Path) -> None:
+def test_run_astra_phase1_produces_five_workbooks(tmp_path: Path) -> None:
     outputs = run_astra_phase1(
         input_paths=[],
         run_dir=tmp_path,
@@ -213,6 +213,7 @@ def test_run_astra_phase1_produces_four_workbooks(tmp_path: Path) -> None:
     assert outputs == [
         tmp_path / "NEW_BUSINESS_PPOS.xlsx",
         tmp_path / "COVERAGE_UNIT.xlsx",
+        tmp_path / "REINSURANCE.xlsx",
         tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
         tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
     ]
@@ -238,8 +239,18 @@ def test_run_astra_phase1_produces_four_workbooks(tmp_path: Path) -> None:
     assert cu_rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
     assert cu_rows[17] == ("IT06ABCDE2024", 1) + (0,) * 100
 
+    # REINSURANCE: 32 rows per GoC + header. Per GoC: 16 IFE then 16 CLOSING.
+    rein_rows = list(
+        openpyxl.load_workbook(outputs[2])["REINSURANCE"].iter_rows(values_only=True)
+    )
+    assert rein_rows[0] == ("GOC_ID", "VARIABLE_NAME", 1, "T")
+    assert len(rein_rows) == 1 + 2 * 32
+    assert rein_rows[1] == ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024)
+    assert rein_rows[17] == ("IT05PABPPLE2024", "LOSSRECO_CLOSING", 0, 2024)
+    assert rein_rows[33] == ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024)
+
     # OCI files are still empty placeholders
-    for p in outputs[2:]:
+    for p in outputs[3:]:
         wb = openpyxl.load_workbook(p)
         assert len(wb.sheetnames) == 1
         assert list(wb[wb.sheetnames[0]].iter_rows(values_only=True)) == []

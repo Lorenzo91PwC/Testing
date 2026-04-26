@@ -21,6 +21,7 @@ from .skill import (
     create_mp_observation_year,
     create_new_business_ppos,
     create_payment_pattern,
+    create_reinsurance,
     create_risk_adjustment,
     extract_unique_goc_names,
     lookup_payment_pattern_values,
@@ -155,6 +156,9 @@ def run_astra_phase1(
     - ``{run_dir}/COVERAGE_UNIT.xlsx`` — 102 columns
       (``GOC_ID``, ``PROJECTION_PERIOD``, ``1``..``100``); same row
       layout as NEW_BUSINESS_PPOS.
+    - ``{run_dir}/REINSURANCE.xlsx`` — four columns
+      (``GOC_ID``, ``VARIABLE_NAME``, ``1``, ``T``); 32 rows per GoC
+      (16 ``LOSSRECO_IFE_ALLOCATION`` then 16 ``LOSSRECO_CLOSING``).
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder
       (population rules TODO).
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder
@@ -179,9 +183,22 @@ def run_astra_phase1(
         output_path=str(coverage_unit_path),
     )
 
+    reinsurance_path = run_dir / "REINSURANCE.xlsx"
+    create_reinsurance(
+        goc_names=goc_names,
+        year=year,
+        output_path=str(reinsurance_path),
+    )
+
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
     create_empty_workbook(str(opening_path), sheet_name="OCI_OPTION_CF_OPENING")
 
-    return [new_business_path, coverage_unit_path, closing_path, opening_path]
+    return [
+        new_business_path,
+        coverage_unit_path,
+        reinsurance_path,
+        closing_path,
+        opening_path,
+    ]

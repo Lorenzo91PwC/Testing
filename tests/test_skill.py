@@ -13,6 +13,7 @@ from excel_pipeline.skill import (
     create_mp_observation_year,
     create_new_business_ppos,
     create_payment_pattern,
+    create_reinsurance,
     create_risk_adjustment,
     extract_unique_goc_names,
     lookup_payment_pattern_values,
@@ -539,3 +540,57 @@ def test_create_coverage_unit_empty_goc_list(tmp_path: Path) -> None:
     # Header only
     assert len(rows) == 1
     assert rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
+
+
+def test_create_reinsurance(tmp_path: Path) -> None:
+    output = tmp_path / "REINSURANCE.xlsx"
+
+    result = create_reinsurance(
+        goc_names=["IT05PABPPLE", "IT06ABCDE"],
+        year=2024,
+        output_path=str(output),
+    )
+
+    assert result == {
+        "output_path": str(output),
+        "rows": 2 * 2 * 16,
+        "columns": ["GOC_ID", "VARIABLE_NAME", "1", "T"],
+    }
+
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["REINSURANCE"].iter_rows(values_only=True))
+
+    assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1, "T")
+    # 1 header + (2 GoCs * 2 variables * 16 cohorts)
+    assert len(rows) == 1 + 2 * 2 * 16
+
+    # First GoC, first variable: 16 cohort rows from 2024 down to 2009
+    expected_first_block = [
+        (f"IT05PABPPLE{2024 - i}", "LOSSRECO_IFE_ALLOCATION", 0, 2024 - i)
+        for i in range(16)
+    ]
+    assert rows[1:17] == expected_first_block
+
+    # First GoC, second variable: same cohort years, LOSSRECO_CLOSING
+    expected_second_block = [
+        (f"IT05PABPPLE{2024 - i}", "LOSSRECO_CLOSING", 0, 2024 - i)
+        for i in range(16)
+    ]
+    assert rows[17:33] == expected_second_block
+
+    # Second GoC starts at row 33 (index from 1)
+    assert rows[33] == ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024)
+    assert rows[49] == ("IT06ABCDE2024", "LOSSRECO_CLOSING", 0, 2024)
+
+
+def test_create_reinsurance_empty_goc_list(tmp_path: Path) -> None:
+    output = tmp_path / "REINSURANCE.xlsx"
+
+    result = create_reinsurance(
+        goc_names=[], year=2024, output_path=str(output),
+    )
+
+    assert result["rows"] == 0
+    wb = openpyxl.load_workbook(output)
+    rows = list(wb["REINSURANCE"].iter_rows(values_only=True))
+    assert rows == [("GOC_ID", "VARIABLE_NAME", 1, "T")]
