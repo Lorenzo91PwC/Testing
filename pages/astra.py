@@ -30,6 +30,14 @@ ENTITIES: list[tuple[int, str]] = [
     (19, "NOBIS"),
 ]
 
+ASTRA_DEFAULT_GOC_SEG_LIST: list[str] = [
+    "IT05RRIEEBB",
+    "IT05RRIHEBB",
+    "IT05RRIHMAF",
+    "IT05RRIHVIC",
+    "IT05RRIHAST",
+]
+
 st.set_page_config(
     page_title="Astra Input Builder",
     page_icon="🚀",
@@ -89,6 +97,18 @@ entity = st.selectbox(
     "Entity to analyze",
     options=ENTITIES,
     format_func=lambda e: f"{e[0]} — {e[1]}",
+)
+
+goc_seg_list = st.multiselect(
+    "GoC list for MP_GOC_SEG",
+    options=ASTRA_DEFAULT_GOC_SEG_LIST,
+    default=ASTRA_DEFAULT_GOC_SEG_LIST,
+    accept_new_options=True,
+    help=(
+        "Used to update MP_GOC_SEG (skill not yet wired). The five "
+        "defaults are pre-loaded; remove with the × on each chip or "
+        "type a new code and press Enter to add it."
+    ),
 )
 
 run_clicked = st.button(
