@@ -267,6 +267,19 @@ def _build_aom_impact_fixture(path: Path, rows: list[tuple]) -> None:
     wb.save(path)
 
 
+def _build_curve_id_param_fixture(path: Path, rows: list[tuple]) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="GOC_ID")
+    ws.cell(row=1, column=2, value="VARIABLE_NAME")
+    ws.cell(row=1, column=3, value=1)
+    for i, (a, b, c) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1, value=a)
+        ws.cell(row=i, column=2, value=b)
+        ws.cell(row=i, column=3, value=c)
+    wb.save(path)
+
+
 def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
@@ -294,9 +307,18 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         aom_impact,
         [("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0)],  # historical entry
     )
+    curve_id_param = inputs_dir / "1.7_2024.12.31_CURVE_ID_PARAM.xlsx"
+    _build_curve_id_param_fixture(
+        curve_id_param,
+        [
+            ("IT05PABPPLE2024", "CLOSING_CURVE_ID", None),
+            ("IT05PABPPLE2024", "OPENING_CURVE_ID", None),
+            ("IT05PABPPLE2024", "CREDITED_RATE_CURVE_ID", None),
+        ],
+    )
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params, mp_goc_seg, aom_impact],
+        input_paths=[ceded, pp_params, mp_goc_seg, aom_impact, curve_id_param],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",
@@ -304,6 +326,8 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         semester=2,
         health_perimeter_gocs=["IT05RRIEEBB"],
         actuarial_aom_impact_pairs=[("DA_LIC_OP", 0), ("DA_LIC_CLO", 0)],
+        closing_curve_name="pippo",
+        opening_curve_name="carlo",
     )
 
     assert outputs == [
@@ -314,6 +338,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx",
         tmp_path / "MP_GOC_SEG.xlsx",
         tmp_path / "ACTUARIAL_AOM_IMPACT.xlsx",
+        tmp_path / "CURVE_ID_PARAM.xlsx",
         tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
         tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
     ]
@@ -400,6 +425,17 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         ("IT06ABCDE2024", "DA_LIC_OP", 0),
     ]
 
+    # CURVE_ID_PARAM: each variable filled per spec
+    curve_rows = list(
+        openpyxl.load_workbook(outputs[7]).active.iter_rows(values_only=True)
+    )
+    assert curve_rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1),
+        ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
+        ("IT05PABPPLE2024", "OPENING_CURVE_ID", "carlo"),
+        ("IT05PABPPLE2024", "CREDITED_RATE_CURVE_ID", "IT05PABPPLE2024"),
+    ]
+
 
 def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     """Pairs outside [year-15, year] are dropped before generation."""
@@ -422,9 +458,11 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     _build_mp_goc_seg_fixture(mp_goc_seg, [])
     aom_impact = inputs_dir / "1.6_ACTUARIAL_AOM_IMPACT.xlsx"
     _build_aom_impact_fixture(aom_impact, [])
+    curve_id_param = inputs_dir / "1.7_CURVE_ID_PARAM.xlsx"
+    _build_curve_id_param_fixture(curve_id_param, [])
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params, mp_goc_seg, aom_impact],
+        input_paths=[ceded, pp_params, mp_goc_seg, aom_impact, curve_id_param],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",
@@ -432,6 +470,8 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
         semester=2,
         health_perimeter_gocs=[],
         actuarial_aom_impact_pairs=[],
+        closing_curve_name="",
+        opening_curve_name="",
     )
 
     # Only 3 of the 5 pairs survive the filter
@@ -460,4 +500,6 @@ def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:
             semester=2,
             health_perimeter_gocs=[],
             actuarial_aom_impact_pairs=[],
+            closing_curve_name="",
+            opening_curve_name="",
         )

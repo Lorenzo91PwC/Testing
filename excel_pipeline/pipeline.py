@@ -30,6 +30,7 @@ from .skill import (
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
+    update_curve_id_param,
     update_mp_goc_seg,
     update_projection_parameters_entity,
 )
@@ -39,6 +40,7 @@ PAYMENT_PATTERNS_SUFFIX = "Payment_Patterns_&_Risk_Adjustments"
 PROJECTION_PARAMETERS_SUFFIX = "PROJECTION_PARAMETERS_ENTITY"
 MP_GOC_SEG_SUFFIX = "MP_GOC_SEG"
 ACTUARIAL_AOM_IMPACT_SUFFIX = "ACTUARIAL_AOM_IMPACT"
+CURVE_ID_PARAM_SUFFIX = "CURVE_ID_PARAM"
 
 
 def _find_file_by_suffix(paths: list[Path], suffix: str) -> Path:
@@ -156,6 +158,8 @@ def run_astra_phase1(
     semester: int,
     health_perimeter_gocs: list[str],
     actuarial_aom_impact_pairs: list[tuple[str, Any]],
+    closing_curve_name: str,
+    opening_curve_name: str,
 ) -> list[Path]:
     """Astra Phase 1.
 
@@ -182,6 +186,10 @@ def run_astra_phase1(
       rows appended (one per ``(goc_id, step_id, value)`` combination
       from the kept pairs and ``actuarial_aom_impact_pairs``); the full
       sheet is sorted by columns A and B.
+    - ``{run_dir}/CURVE_ID_PARAM.xlsx`` — uploaded copy with column C
+      filled per VARIABLE_NAME: ``CLOSING_CURVE_ID`` ->
+      ``closing_curve_name``, ``OPENING_CURVE_ID`` ->
+      ``opening_curve_name``, ``CREDITED_RATE_CURVE_ID`` -> column A.
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder.
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder.
 
@@ -238,6 +246,15 @@ def run_astra_phase1(
         step_id_value_pairs=actuarial_aom_impact_pairs,
     )
 
+    curve_id_param_in = _find_file_by_suffix(input_paths, CURVE_ID_PARAM_SUFFIX)
+    curve_id_param_path = run_dir / "CURVE_ID_PARAM.xlsx"
+    update_curve_id_param(
+        input_path=str(curve_id_param_in),
+        output_path=str(curve_id_param_path),
+        closing_curve_name=closing_curve_name,
+        opening_curve_name=opening_curve_name,
+    )
+
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
@@ -251,6 +268,7 @@ def run_astra_phase1(
         projection_params_path,
         mp_goc_seg_path,
         aom_impact_path,
+        curve_id_param_path,
         closing_path,
         opening_path,
     ]

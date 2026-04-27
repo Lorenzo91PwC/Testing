@@ -465,6 +465,51 @@ def create_payment_pattern(
 GOC_NAME_LENGTH = 11  # the GoC name is the first 11 chars of GOC_ID
 
 
+def update_curve_id_param(
+    input_path: str,
+    output_path: str,
+    closing_curve_name: str,
+    opening_curve_name: str,
+) -> dict[str, Any]:
+    """Fill column C of CURVE_ID_PARAM.xlsx based on the VARIABLE_NAME.
+
+    The input has three columns: ``GOC_ID`` (A), ``VARIABLE_NAME`` (B),
+    a value column (C) — typically empty in the source. For each data
+    row the function writes column C as follows:
+
+    - ``VARIABLE_NAME == 'CLOSING_CURVE_ID'`` -> ``closing_curve_name``
+    - ``VARIABLE_NAME == 'OPENING_CURVE_ID'`` -> ``opening_curve_name``
+    - ``VARIABLE_NAME == 'CREDITED_RATE_CURVE_ID'`` -> ``GOC_ID`` (col A)
+
+    Rows whose VARIABLE_NAME is anything else are left untouched, so any
+    other historical content in the file passes through unchanged.
+    """
+    wb = openpyxl.load_workbook(input_path)
+    ws = wb.active
+
+    rows_updated = 0
+    for r in range(2, ws.max_row + 1):
+        variable_name = ws.cell(row=r, column=2).value
+        if variable_name is None:
+            continue
+        key = str(variable_name).strip()
+        if key == "CLOSING_CURVE_ID":
+            ws.cell(row=r, column=3, value=closing_curve_name)
+            rows_updated += 1
+        elif key == "OPENING_CURVE_ID":
+            ws.cell(row=r, column=3, value=opening_curve_name)
+            rows_updated += 1
+        elif key == "CREDITED_RATE_CURVE_ID":
+            ws.cell(row=r, column=3, value=ws.cell(row=r, column=1).value)
+            rows_updated += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows_updated": rows_updated,
+    }
+
+
 def append_actuarial_aom_impact(
     input_path: str,
     output_path: str,

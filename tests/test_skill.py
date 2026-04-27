@@ -22,6 +22,7 @@ from excel_pipeline.skill import (
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
+    update_curve_id_param,
     update_mp_goc_seg,
     update_projection_parameters_entity,
 )
@@ -1013,4 +1014,84 @@ def test_append_actuarial_aom_impact_skips_blank_step_ids(tmp_path: Path) -> Non
     assert rows[1:] == [
         ("G2025", "STEP_A", 1),
         ("G2025", "STEP_B", 5),
+    ]
+
+
+def _build_curve_id_param_fixture(path: Path, rows: list[tuple]) -> None:
+    """rows: list of (goc_id, variable_name, col_c). Header is added."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="GOC_ID")
+    ws.cell(row=1, column=2, value="VARIABLE_NAME")
+    ws.cell(row=1, column=3, value=1)
+    for i, (a, b, c) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1, value=a)
+        ws.cell(row=i, column=2, value=b)
+        ws.cell(row=i, column=3, value=c)
+    wb.save(path)
+
+
+def test_update_curve_id_param_fills_known_variables(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_curve_id_param_fixture(
+        fixture,
+        [
+            ("IT05PABPPLE2024", "CLOSING_CURVE_ID", None),
+            ("IT05PABPPLE2024", "OPENING_CURVE_ID", None),
+            ("IT05PABPPLE2024", "CREDITED_RATE_CURVE_ID", None),
+            ("IT06ABCDE2024", "CLOSING_CURVE_ID", None),
+            ("IT06ABCDE2024", "CREDITED_RATE_CURVE_ID", None),
+        ],
+    )
+
+    result = update_curve_id_param(
+        input_path=str(fixture),
+        output_path=str(output),
+        closing_curve_name="pippo",
+        opening_curve_name="carlo",
+    )
+
+    assert result == {"output_path": str(output), "rows_updated": 5}
+
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1),
+        ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
+        ("IT05PABPPLE2024", "OPENING_CURVE_ID", "carlo"),
+        ("IT05PABPPLE2024", "CREDITED_RATE_CURVE_ID", "IT05PABPPLE2024"),
+        ("IT06ABCDE2024", "CLOSING_CURVE_ID", "pippo"),
+        ("IT06ABCDE2024", "CREDITED_RATE_CURVE_ID", "IT06ABCDE2024"),
+    ]
+
+
+def test_update_curve_id_param_leaves_other_variables_untouched(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_curve_id_param_fixture(
+        fixture,
+        [
+            ("IT05PABPPLE2024", "CLOSING_CURVE_ID", None),
+            ("IT05PABPPLE2024", "SOMETHING_ELSE", "preserved"),
+            ("IT05PABPPLE2024", None, "also preserved"),
+        ],
+    )
+
+    result = update_curve_id_param(
+        input_path=str(fixture),
+        output_path=str(output),
+        closing_curve_name="pippo",
+        opening_curve_name="carlo",
+    )
+
+    assert result["rows_updated"] == 1
+
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("GOC_ID", "VARIABLE_NAME", 1),
+        ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
+        ("IT05PABPPLE2024", "SOMETHING_ELSE", "preserved"),
+        ("IT05PABPPLE2024", None, "also preserved"),
     ]

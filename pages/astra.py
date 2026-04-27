@@ -109,6 +109,20 @@ entity = st.selectbox(
     format_func=lambda e: f"{e[0]} — {e[1]}",
 )
 
+col_close_curve, col_open_curve = st.columns(2)
+with col_close_curve:
+    closing_curve_name = st.text_input(
+        "Closing curve name",
+        help="Goes into column C of CURVE_ID_PARAM.xlsx for rows where "
+        "VARIABLE_NAME == 'CLOSING_CURVE_ID'.",
+    )
+with col_open_curve:
+    opening_curve_name = st.text_input(
+        "Opening curve name",
+        help="Goes into column C of CURVE_ID_PARAM.xlsx for rows where "
+        "VARIABLE_NAME == 'OPENING_CURVE_ID'.",
+    )
+
 st.info(
     "💡 **Health perimeter GoC** — five default codes are pre-loaded. "
     "**Remove** a code by clicking the × on its chip. **Add** a new "
@@ -191,6 +205,8 @@ if run_clicked and uploaded and entity:
                 semester=int(semester),
                 health_perimeter_gocs=list(goc_seg_list),
                 actuarial_aom_impact_pairs=aom_impact_pairs,
+                closing_curve_name=closing_curve_name.strip(),
+                opening_curve_name=opening_curve_name.strip(),
             )
             for out in outputs:
                 st.write(f"✅ → `{out.name}`")
