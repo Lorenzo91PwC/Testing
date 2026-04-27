@@ -748,6 +748,34 @@ def test_update_projection_parameters_entity_h1_2025(tmp_path: Path) -> None:
     assert by_param["CF_TIMESTEP"] == "YEARLY"
 
 
+def test_update_projection_parameters_entity_drops_extra_columns(tmp_path: Path) -> None:
+    """Even if the input has a stray third column, the output is 2-column."""
+    fixture = tmp_path / "input.xlsx"
+    output = tmp_path / "out.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="PARAMETER")
+    ws.cell(row=1, column=2, value="VALUE")
+    ws.cell(row=1, column=3, value="Notes")  # stray column to be dropped
+    ws.cell(row=2, column=1, value="CF_TIMESTEP")
+    ws.cell(row=2, column=2, value="SEMESTRIAL")
+    ws.cell(row=2, column=3, value="should disappear")
+    wb.save(fixture)
+
+    update_projection_parameters_entity(
+        input_path=str(fixture),
+        output_path=str(output),
+        year=2025,
+        semester=2,
+    )
+
+    out_ws = openpyxl.load_workbook(output).active
+    assert out_ws.max_column == 2
+    assert out_ws.cell(row=1, column=1).value == "PARAMETER"
+    assert out_ws.cell(row=1, column=2).value == "VALUE"
+    assert out_ws.cell(row=2, column=2).value == "YEARLY"
+
+
 def test_update_projection_parameters_entity_invalid_semester(tmp_path: Path) -> None:
     fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx"
     _build_projection_parameters_fixture(fixture)

@@ -527,6 +527,11 @@ def update_projection_parameters_entity(
             ws.cell(row=r, column=2, value=updates[key])
             applied.append(key)
 
+    # Defensive: the file is contractually two columns. Drop anything past
+    # column B (e.g. a leftover annotation column from a draft).
+    if ws.max_column > 2:
+        ws.delete_cols(3, ws.max_column - 2)
+
     save_workbook(wb, output_path)
     return {
         "output_path": output_path,
