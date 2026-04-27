@@ -465,6 +465,65 @@ def create_payment_pattern(
 GOC_NAME_LENGTH = 11  # the GoC name is the first 11 chars of GOC_ID
 
 
+def append_actuarial_aom_impact(
+    input_path: str,
+    output_path: str,
+    pairs: list[dict[str, Any]],
+    step_id_value_pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    """Append new rows to ACTUARIAL_AOM_IMPACT.xlsx and sort by A then B.
+
+    The file is treated as an append-only history. Existing rows are
+    preserved verbatim. For each ``(goc, cohort_year)`` pair (typically
+    the filtered list from ``extract_unique_goc_cohort_pairs``) and each
+    ``(step_id, value)`` pair from the user form, a new row is appended:
+    ``[goc_id, step_id, value]``. After append, all data rows (header
+    excluded) are sorted alphabetically by column A (``GOC_ID``) and
+    then column B (``STEP_ID``).
+
+    Columns beyond column C, if any, are preserved in the existing rows
+    but left empty for newly appended rows. ``step_id_value_pairs`` with
+    blank STEP_ID strings are skipped.
+    """
+    wb = openpyxl.load_workbook(input_path)
+    ws = wb.active
+    n_cols = max(ws.max_column, 3)
+
+    # Read existing rows (skip purely-empty rows that openpyxl may report)
+    existing: list[tuple[Any, ...]] = []
+    for r in range(2, ws.max_row + 1):
+        row = tuple(ws.cell(row=r, column=c).value for c in range(1, n_cols + 1))
+        if any(v is not None for v in row):
+            existing.append(row)
+
+    # Build new rows
+    cleaned_pairs = [
+        (str(step).strip(), value)
+        for step, value in step_id_value_pairs
+        if step is not None and str(step).strip()
+    ]
+    new_rows: list[tuple[Any, ...]] = []
+    for pair in pairs:
+        for step_id, value in cleaned_pairs:
+            row = (pair["goc_id"], step_id, value) + (None,) * (n_cols - 3)
+            new_rows.append(row)
+
+    combined = existing + new_rows
+    combined.sort(key=lambda r: (str(r[0] or ""), str(r[1] or "")))
+
+    # Rewrite from row 2 onward
+    for i, row in enumerate(combined, start=2):
+        for c, v in enumerate(row, start=1):
+            ws.cell(row=i, column=c, value=v)
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows_appended": len(new_rows),
+        "rows_total": len(combined),
+    }
+
+
 def update_mp_goc_seg(
     input_path: str,
     output_path: str,

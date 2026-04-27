@@ -17,6 +17,7 @@ from excel_pipeline.skill import (
     create_payment_pattern,
     create_reinsurance,
     create_risk_adjustment,
+    append_actuarial_aom_impact,
     extract_unique_goc_cohort_pairs,
     extract_unique_goc_names,
     lookup_payment_pattern_values,
@@ -887,3 +888,129 @@ def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
     assert rows[1] == ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1)
     assert rows[2] == ("X_02_P&C", "SHORT", "02_P&C", 1)
     assert rows[3] == ("Y_02_P&C", None, "02_P&C", 1)
+
+
+def _build_aom_impact_fixture(path: Path, rows: list[tuple]) -> None:
+    """rows: list of (goc_id, step_id, value). Header is added."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="GOC_ID")
+    ws.cell(row=1, column=2, value="STEP_ID")
+    ws.cell(row=1, column=3, value=1)
+    for i, (a, b, c) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1, value=a)
+        ws.cell(row=i, column=2, value=b)
+        ws.cell(row=i, column=3, value=c)
+    wb.save(path)
+
+
+def test_append_actuarial_aom_impact_appends_and_sorts(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_aom_impact_fixture(
+        fixture,
+        [
+            # Pre-existing historical rows, intentionally out of order
+            ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
+            ("IT05PABPPLE2024", "RA_LIC_OP", 0),
+            ("IT05PABPPLE2025", "PVFC_LIC_UNWIND", 0),
+        ],
+    )
+
+    pairs = [
+        {"goc_id": "IT05PABPPLE2025", "goc": "IT05PABPPLE", "year": 2025},
+        {"goc_id": "IT06ABCDE2025", "goc": "IT06ABCDE", "year": 2025},
+    ]
+    step_pairs = [
+        ("DA_LIC_OP", 0),
+        ("DA_LIC_CLO", 0),
+    ]
+
+    result = append_actuarial_aom_impact(
+        input_path=str(fixture),
+        output_path=str(output),
+        pairs=pairs,
+        step_id_value_pairs=step_pairs,
+    )
+
+    assert result == {
+        "output_path": str(output),
+        "rows_appended": 4,  # 2 pairs * 2 steps
+        "rows_total": 7,  # 3 existing + 4 new
+    }
+
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+
+    # Header preserved
+    assert rows[0] == ("GOC_ID", "STEP_ID", 1)
+
+    # All 7 rows sorted by (A, B)
+    assert rows[1:] == [
+        ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
+        ("IT05PABPPLE2024", "RA_LIC_OP", 0),
+        ("IT05PABPPLE2025", "DA_LIC_CLO", 0),
+        ("IT05PABPPLE2025", "DA_LIC_OP", 0),
+        ("IT05PABPPLE2025", "PVFC_LIC_UNWIND", 0),
+        ("IT06ABCDE2025", "DA_LIC_CLO", 0),
+        ("IT06ABCDE2025", "DA_LIC_OP", 0),
+    ]
+
+
+def test_append_actuarial_aom_impact_empty_inputs(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_aom_impact_fixture(
+        fixture,
+        [("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0)],
+    )
+
+    # No pairs and no step_pairs -> nothing to append
+    result = append_actuarial_aom_impact(
+        input_path=str(fixture),
+        output_path=str(output),
+        pairs=[],
+        step_id_value_pairs=[],
+    )
+    assert result["rows_appended"] == 0
+    assert result["rows_total"] == 1
+
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("GOC_ID", "STEP_ID", 1),
+        ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
+    ]
+
+
+def test_append_actuarial_aom_impact_skips_blank_step_ids(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_aom_impact_fixture(fixture, [])
+
+    pairs = [{"goc_id": "G2025", "goc": "G", "year": 2025}]
+    # Mix valid + blank/None step ids
+    step_pairs = [
+        ("STEP_A", 1),
+        ("", 2),
+        ("  ", 3),
+        (None, 4),
+        ("STEP_B", 5),
+    ]
+
+    result = append_actuarial_aom_impact(
+        input_path=str(fixture),
+        output_path=str(output),
+        pairs=pairs,
+        step_id_value_pairs=step_pairs,
+    )
+
+    # Only 2 valid steps survive
+    assert result["rows_appended"] == 2
+
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows[1:] == [
+        ("G2025", "STEP_A", 1),
+        ("G2025", "STEP_B", 5),
+    ]

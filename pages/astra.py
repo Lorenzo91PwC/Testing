@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from excel_pipeline.pipeline import run_astra_phase1
@@ -36,6 +37,13 @@ ASTRA_DEFAULT_GOC_SEG_LIST: list[str] = [
     "IT05RRIHMAF",
     "IT05RRIHVIC",
     "IT05RRIHAST",
+]
+
+ASTRA_DEFAULT_AOM_IMPACT_PAIRS: list[tuple[str, int]] = [
+    ("DA_LIC_OP", 0),
+    ("DA_LIC_INCLAIM_INCEXP", 0),
+    ("DA_LIC_CHG", 0),
+    ("DA_LIC_CLO", 0),
 ]
 
 st.set_page_config(
@@ -114,6 +122,46 @@ goc_seg_list = st.multiselect(
     accept_new_options=True,
 )
 
+st.info(
+    "💡 **AOM Impact rows** — for every (GoC, year) found in the Ceded "
+    "file, the rows below are appended to `ACTUARIAL_AOM_IMPACT.xlsx`. "
+    "Use the `+` button at the bottom of the table to add a row, or "
+    "the row's checkbox + Delete key to remove it.",
+    icon="ℹ️",
+)
+aom_impact_df = st.data_editor(
+    pd.DataFrame(
+        [{"STEP_ID": s, "Value": v} for s, v in ASTRA_DEFAULT_AOM_IMPACT_PAIRS]
+    ),
+    num_rows="dynamic",
+    hide_index=True,
+    column_config={
+        "STEP_ID": st.column_config.TextColumn(
+            "STEP_ID",
+            required=True,
+            help="Goes into column B of ACTUARIAL_AOM_IMPACT.xlsx.",
+        ),
+        "Value": st.column_config.NumberColumn(
+            "Value",
+            required=True,
+            help="Goes into column C of ACTUARIAL_AOM_IMPACT.xlsx.",
+        ),
+    },
+    key="astra_aom_impact_editor",
+)
+aom_impact_pairs: list[tuple[str, object]] = []
+for _, row in aom_impact_df.iterrows():
+    step = row.get("STEP_ID")
+    val = row.get("Value")
+    if step is None or pd.isna(step):
+        continue
+    step_str = str(step).strip()
+    if not step_str:
+        continue
+    if val is None or pd.isna(val):
+        continue
+    aom_impact_pairs.append((step_str, val))
+
 run_clicked = st.button(
     "▶ Run pipeline",
     type="primary",
@@ -142,6 +190,7 @@ if run_clicked and uploaded and entity:
                 year=int(year),
                 semester=int(semester),
                 health_perimeter_gocs=list(goc_seg_list),
+                actuarial_aom_impact_pairs=aom_impact_pairs,
             )
             for out in outputs:
                 st.write(f"✅ → `{out.name}`")

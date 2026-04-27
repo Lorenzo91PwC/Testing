@@ -16,6 +16,7 @@ from typing import Any
 
 from .skill import (
     ASTRA_COHORT_YEAR_SPAN,
+    append_actuarial_aom_impact,
     create_coverage_unit,
     create_empty_workbook,
     create_mandatory_actuals,
@@ -37,6 +38,7 @@ CEDED_SUFFIX = "AAI_P&C_Ceded"
 PAYMENT_PATTERNS_SUFFIX = "Payment_Patterns_&_Risk_Adjustments"
 PROJECTION_PARAMETERS_SUFFIX = "PROJECTION_PARAMETERS_ENTITY"
 MP_GOC_SEG_SUFFIX = "MP_GOC_SEG"
+ACTUARIAL_AOM_IMPACT_SUFFIX = "ACTUARIAL_AOM_IMPACT"
 
 
 def _find_file_by_suffix(paths: list[Path], suffix: str) -> Path:
@@ -153,6 +155,7 @@ def run_astra_phase1(
     year: int,
     semester: int,
     health_perimeter_gocs: list[str],
+    actuarial_aom_impact_pairs: list[tuple[str, Any]],
 ) -> list[Path]:
     """Astra Phase 1.
 
@@ -175,6 +178,10 @@ def run_astra_phase1(
       file with ``P&C`` rewritten to ``HLTH_PC`` in columns A and C for
       rows whose GoC name (first 11 chars of column B) is in
       ``health_perimeter_gocs``.
+    - ``{run_dir}/ACTUARIAL_AOM_IMPACT.xlsx`` — historical file with new
+      rows appended (one per ``(goc_id, step_id, value)`` combination
+      from the kept pairs and ``actuarial_aom_impact_pairs``); the full
+      sheet is sorted by columns A and B.
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder.
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder.
 
@@ -222,6 +229,15 @@ def run_astra_phase1(
         health_perimeter_gocs=health_perimeter_gocs,
     )
 
+    aom_impact_in = _find_file_by_suffix(input_paths, ACTUARIAL_AOM_IMPACT_SUFFIX)
+    aom_impact_path = run_dir / "ACTUARIAL_AOM_IMPACT.xlsx"
+    append_actuarial_aom_impact(
+        input_path=str(aom_impact_in),
+        output_path=str(aom_impact_path),
+        pairs=pairs,
+        step_id_value_pairs=actuarial_aom_impact_pairs,
+    )
+
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
@@ -234,6 +250,7 @@ def run_astra_phase1(
         mandatory_actuals_path,
         projection_params_path,
         mp_goc_seg_path,
+        aom_impact_path,
         closing_path,
         opening_path,
     ]
