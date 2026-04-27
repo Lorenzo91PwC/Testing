@@ -99,16 +99,17 @@ entity = st.selectbox(
     format_func=lambda e: f"{e[0]} — {e[1]}",
 )
 
+st.info(
+    "💡 **Health perimeter GoC** — five default codes are pre-loaded. "
+    "**Remove** a code by clicking the × on its chip. **Add** a new "
+    "code by typing it in the box and pressing Enter.",
+    icon="ℹ️",
+)
 goc_seg_list = st.multiselect(
-    "GoC list for MP_GOC_SEG",
+    "Health perimeter GoC",
     options=ASTRA_DEFAULT_GOC_SEG_LIST,
     default=ASTRA_DEFAULT_GOC_SEG_LIST,
     accept_new_options=True,
-    help=(
-        "Used to update MP_GOC_SEG (skill not yet wired). The five "
-        "defaults are pre-loaded; remove with the × on each chip or "
-        "type a new code and press Enter to add it."
-    ),
 )
 
 run_clicked = st.button(
