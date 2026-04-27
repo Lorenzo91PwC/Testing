@@ -29,12 +29,14 @@ from .skill import (
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
+    update_mp_goc_seg,
     update_projection_parameters_entity,
 )
 
 CEDED_SUFFIX = "AAI_P&C_Ceded"
 PAYMENT_PATTERNS_SUFFIX = "Payment_Patterns_&_Risk_Adjustments"
 PROJECTION_PARAMETERS_SUFFIX = "PROJECTION_PARAMETERS_ENTITY"
+MP_GOC_SEG_SUFFIX = "MP_GOC_SEG"
 
 
 def _find_file_by_suffix(paths: list[Path], suffix: str) -> Path:
@@ -150,6 +152,7 @@ def run_astra_phase1(
     entity_name: str,
     year: int,
     semester: int,
+    health_perimeter_gocs: list[str],
 ) -> list[Path]:
     """Astra Phase 1.
 
@@ -168,6 +171,10 @@ def run_astra_phase1(
     - ``{run_dir}/PROJECTION_PARAMETERS_ENTITY.xlsx`` — uploaded copy of
       the Projection Parameters file with rule-based VALUE edits applied
       based on ``year`` and ``semester``.
+    - ``{run_dir}/MP_GOC_SEG.xlsx`` — uploaded copy of the MP_GOC_SEG
+      file with ``P&C`` rewritten to ``HLTH_PC`` in columns A and C for
+      rows whose GoC name (first 11 chars of column B) is in
+      ``health_perimeter_gocs``.
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder.
     - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder.
 
@@ -207,6 +214,14 @@ def run_astra_phase1(
         semester=semester,
     )
 
+    mp_goc_seg_in = _find_file_by_suffix(input_paths, MP_GOC_SEG_SUFFIX)
+    mp_goc_seg_path = run_dir / "MP_GOC_SEG.xlsx"
+    update_mp_goc_seg(
+        input_path=str(mp_goc_seg_in),
+        output_path=str(mp_goc_seg_path),
+        health_perimeter_gocs=health_perimeter_gocs,
+    )
+
     closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
     opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
     create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
@@ -218,6 +233,7 @@ def run_astra_phase1(
         reinsurance_path,
         mandatory_actuals_path,
         projection_params_path,
+        mp_goc_seg_path,
         closing_path,
         opening_path,
     ]

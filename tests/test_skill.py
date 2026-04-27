@@ -21,6 +21,7 @@ from excel_pipeline.skill import (
     extract_unique_goc_names,
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
+    update_mp_goc_seg,
     update_projection_parameters_entity,
 )
 
@@ -787,3 +788,102 @@ def test_update_projection_parameters_entity_invalid_semester(tmp_path: Path) ->
             year=2025,
             semester=3,
         )
+
+
+def _build_mp_goc_seg_fixture(path: Path, rows: list[tuple]) -> None:
+    """rows: list of (col_a, col_b, col_c, col_d). Header row is added."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="GOC_SEG_ID")
+    ws.cell(row=1, column=2, value="GOC_ID")
+    ws.cell(row=1, column=3, value="SEG_ID")
+    ws.cell(row=1, column=4, value="ALLOCATION_RATIO")
+    for i, (a, b, c, d) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1, value=a)
+        ws.cell(row=i, column=2, value=b)
+        ws.cell(row=i, column=3, value=c)
+        ws.cell(row=i, column=4, value=d)
+    wb.save(path)
+
+
+def test_update_mp_goc_seg_rewrites_only_perimeter_rows(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_mp_goc_seg_fixture(
+        fixture,
+        [
+            ("IT05PABPPLE2025_02_P&C", "IT05PABPPLE2025", "02_P&C", 1),
+            ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1),
+            ("IT05RRIEEBB2025_02_P&C", "IT05RRIEEBB2025", "02_P&C", 1),
+            ("IT05RRIEEBB2024_02_P&C", "IT05RRIEEBB2024", "02_P&C", 1),
+            ("IT06ABCDE2024_02_P&C", "IT06ABCDE2024", "02_P&C", 1),
+        ],
+    )
+
+    result = update_mp_goc_seg(
+        input_path=str(fixture),
+        output_path=str(output),
+        health_perimeter_gocs=["IT05RRIEEBB"],
+    )
+
+    assert result == {"output_path": str(output), "rows_in_perimeter": 2}
+
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows == [
+        ("GOC_SEG_ID", "GOC_ID", "SEG_ID", "ALLOCATION_RATIO"),
+        # Outside perimeter -> unchanged
+        ("IT05PABPPLE2025_02_P&C", "IT05PABPPLE2025", "02_P&C", 1),
+        ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1),
+        # Inside perimeter -> A and C rewritten, B and D untouched
+        ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1),
+        ("IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1),
+        # Outside perimeter -> unchanged
+        ("IT06ABCDE2024_02_P&C", "IT06ABCDE2024", "02_P&C", 1),
+    ]
+
+
+def test_update_mp_goc_seg_empty_perimeter_changes_nothing(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_mp_goc_seg_fixture(
+        fixture,
+        [("IT05RRIEEBB2025_02_P&C", "IT05RRIEEBB2025", "02_P&C", 1)],
+    )
+
+    result = update_mp_goc_seg(
+        input_path=str(fixture),
+        output_path=str(output),
+        health_perimeter_gocs=[],
+    )
+
+    assert result["rows_in_perimeter"] == 0
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows[1] == ("IT05RRIEEBB2025_02_P&C", "IT05RRIEEBB2025", "02_P&C", 1)
+
+
+def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
+    fixture = tmp_path / "in.xlsx"
+    output = tmp_path / "out.xlsx"
+    _build_mp_goc_seg_fixture(
+        fixture,
+        [
+            ("IT05RRIEEBB2025_02_P&C", "IT05RRIEEBB2025", "02_P&C", 1),  # ok
+            ("X_02_P&C", "SHORT", "02_P&C", 1),  # B too short -> skipped
+            ("Y_02_P&C", None, "02_P&C", 1),  # B None -> skipped
+        ],
+    )
+
+    update_mp_goc_seg(
+        input_path=str(fixture),
+        output_path=str(output),
+        health_perimeter_gocs=["IT05RRIEEBB", "SHORT", ""],
+    )
+
+    ws = openpyxl.load_workbook(output).active
+    rows = list(ws.iter_rows(values_only=True))
+    # Row 1 (IT05RRIEEBB) rewritten; rows 2 and 3 untouched
+    assert rows[1] == ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1)
+    assert rows[2] == ("X_02_P&C", "SHORT", "02_P&C", 1)
+    assert rows[3] == ("Y_02_P&C", None, "02_P&C", 1)

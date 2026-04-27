@@ -59,7 +59,9 @@ st.warning(
     "rules not yet defined; currently produced as empty placeholders.\n"
     "- `INCEPTION_FORWARD_RATES.xlsx` — the source input file (suffix and "
     "sheet) and the specific rates row to extract are still to be defined; "
-    "the output is not produced yet.",
+    "the output is not produced yet.\n\n"
+    "`MP_GOC_SEG.xlsx` is wired and rewrites `P&C` to `HLTH_PC` in "
+    "columns A and C for the GoCs in the Health perimeter list below.",
     icon="🚧",
 )
 
@@ -139,6 +141,7 @@ if run_clicked and uploaded and entity:
                 entity_name=entity_name,
                 year=int(year),
                 semester=int(semester),
+                health_perimeter_gocs=list(goc_seg_list),
             )
             for out in outputs:
                 st.write(f"✅ → `{out.name}`")

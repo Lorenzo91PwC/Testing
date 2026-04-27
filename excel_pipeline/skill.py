@@ -462,6 +462,58 @@ def create_payment_pattern(
     }
 
 
+GOC_NAME_LENGTH = 11  # the GoC name is the first 11 chars of GOC_ID
+
+
+def update_mp_goc_seg(
+    input_path: str,
+    output_path: str,
+    health_perimeter_gocs: list[str],
+) -> dict[str, Any]:
+    """Apply the Health-perimeter rewrite to MP_GOC_SEG.xlsx.
+
+    The input has four columns: ``GOC_SEG_ID`` (A), ``GOC_ID`` (B),
+    ``SEG_ID`` (C), ``ALLOCATION_RATIO`` (D), plus a header row. For
+    each data row the GoC name is read as the first 11 characters of
+    column B; if it appears in ``health_perimeter_gocs`` the substring
+    ``'P&C'`` is replaced with ``'HLTH_PC'`` in columns A and C.
+    Columns B and D, plus rows whose GoC is outside the perimeter, are
+    left untouched. The workbook is saved to ``output_path``.
+    """
+    perimeter = {g.strip() for g in health_perimeter_gocs if g and g.strip()}
+
+    wb = openpyxl.load_workbook(input_path)
+    ws = wb.active
+
+    rows_changed = 0
+    for r in range(2, ws.max_row + 1):
+        goc_id_v = ws.cell(row=r, column=2).value
+        if goc_id_v is None:
+            continue
+        normalized = str(goc_id_v).strip()
+        if len(normalized) < GOC_NAME_LENGTH:
+            continue  # GoC code is the first 11 chars; shorter values are skipped
+        goc_name = normalized[:GOC_NAME_LENGTH]
+        if goc_name not in perimeter:
+            continue
+
+        col_a = ws.cell(row=r, column=1).value
+        if isinstance(col_a, str) and "P&C" in col_a:
+            ws.cell(row=r, column=1, value=col_a.replace("P&C", "HLTH_PC"))
+
+        col_c = ws.cell(row=r, column=3).value
+        if isinstance(col_c, str) and "P&C" in col_c:
+            ws.cell(row=r, column=3, value=col_c.replace("P&C", "HLTH_PC"))
+
+        rows_changed += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "output_path": output_path,
+        "rows_in_perimeter": rows_changed,
+    }
+
+
 def update_projection_parameters_entity(
     input_path: str,
     output_path: str,

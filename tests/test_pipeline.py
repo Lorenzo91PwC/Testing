@@ -239,6 +239,21 @@ def _build_projection_parameters_fixture(path: Path) -> None:
     wb.save(path)
 
 
+def _build_mp_goc_seg_fixture(path: Path, rows: list[tuple]) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value="GOC_SEG_ID")
+    ws.cell(row=1, column=2, value="GOC_ID")
+    ws.cell(row=1, column=3, value="SEG_ID")
+    ws.cell(row=1, column=4, value="ALLOCATION_RATIO")
+    for i, (a, b, c, d) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1, value=a)
+        ws.cell(row=i, column=2, value=b)
+        ws.cell(row=i, column=3, value=c)
+        ws.cell(row=i, column=4, value=d)
+    wb.save(path)
+
+
 def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
@@ -253,14 +268,23 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     )
     pp_params = inputs_dir / "1.4_2024.12.31_PROJECTION_PARAMETERS_ENTITY.xlsx"
     _build_projection_parameters_fixture(pp_params)
+    mp_goc_seg = inputs_dir / "1.5_2024.12.31_MP_GOC_SEG.xlsx"
+    _build_mp_goc_seg_fixture(
+        mp_goc_seg,
+        [
+            ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1),
+            ("IT05RRIEEBB2024_02_P&C", "IT05RRIEEBB2024", "02_P&C", 1),
+        ],
+    )
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params],
+        input_paths=[ceded, pp_params, mp_goc_seg],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",
         year=2024,
         semester=2,
+        health_perimeter_gocs=["IT05RRIEEBB"],
     )
 
     assert outputs == [
@@ -269,6 +293,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         tmp_path / "REINSURANCE.xlsx",
         tmp_path / "MANDATORY_ACTUALS.xlsx",
         tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx",
+        tmp_path / "MP_GOC_SEG.xlsx",
         tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
         tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
     ]
@@ -333,6 +358,13 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     # Untouched
     assert by_param["PROJECTED_PERIODS"] == 110
 
+    # MP_GOC_SEG: only the IT05RRIEEBB row gets P&C -> HLTH_PC
+    seg_rows = list(openpyxl.load_workbook(outputs[5]).active.iter_rows(values_only=True))
+    assert seg_rows[1] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
+    assert seg_rows[2] == (
+        "IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1,
+    )
+
 
 def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     """Pairs outside [year-15, year] are dropped before generation."""
@@ -351,14 +383,17 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     )
     pp_params = inputs_dir / "1.4_PROJECTION_PARAMETERS_ENTITY.xlsx"
     _build_projection_parameters_fixture(pp_params)
+    mp_goc_seg = inputs_dir / "1.5_MP_GOC_SEG.xlsx"
+    _build_mp_goc_seg_fixture(mp_goc_seg, [])
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params],
+        input_paths=[ceded, pp_params, mp_goc_seg],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",
         year=2024,
         semester=2,
+        health_perimeter_gocs=[],
     )
 
     # Only 3 of the 5 pairs survive the filter
@@ -385,4 +420,5 @@ def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:
             entity_name="AAI",
             year=2024,
             semester=2,
+            health_perimeter_gocs=[],
         )
