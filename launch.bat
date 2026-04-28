@@ -51,7 +51,10 @@ if not exist .env (
     exit /b 1
 )
 
+REM --- Open Chrome in app-window mode shortly after Streamlit boots --------
+start "" /B powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 3; Start-Process chrome -ArgumentList '--app=http://localhost:8501' -ErrorAction SilentlyContinue"
+
 REM --- Launch --------------------------------------------------------------
 echo Starting Excel Pipeline...
 echo (Close this window to stop the app.)
-uv run streamlit run app.py
+uv run streamlit run app.py --server.headless=true
