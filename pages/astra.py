@@ -22,7 +22,7 @@ ROOT = Path(__file__).parent.parent
 RUNS_DIR = ROOT / "runs"
 RUNS_DIR.mkdir(exist_ok=True)
 
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+CSV_MIME = "text/csv"
 
 ENTITIES: list[tuple[int, str]] = [
     (14, "MPS"),
@@ -63,20 +63,20 @@ st.caption("Local pipeline that prepares Astra input files — data never leaves
 st.warning(
     "⚠️ **Pending specifications** — the following outputs still need their "
     "population rules:\n\n"
-    "- `OCI_OPTION_CF_CLOSING.xlsx` and `OCI_OPTION_CF_OPENING.xlsx` — "
+    "- `OCI_OPTION_CF_CLOSING.csv` and `OCI_OPTION_CF_OPENING.csv` — "
     "rules not yet defined; currently produced as empty placeholders.\n"
-    "- `INCEPTION_FORWARD_RATES.xlsx` — the source input file (suffix and "
+    "- `INCEPTION_FORWARD_RATES.csv` — the source input file (suffix and "
     "sheet) and the specific rates row to extract are still to be defined; "
     "the output is not produced yet.\n\n"
-    "`MP_GOC_SEG.xlsx` is wired and rewrites `P&C` to `HLTH_PC` in "
+    "`MP_GOC_SEG.csv` is wired and rewrites `P&C` to `HLTH_PC` in "
     "columns A and C for the GoCs in the Health perimeter list below.",
     icon="🚧",
 )
 
 st.subheader("1. Upload input files")
 uploaded = st.file_uploader(
-    "Excel files",
-    type=["xlsx", "xlsm"],
+    "Excel or CSV files",
+    type=["xlsx", "xlsm", "csv"],
     accept_multiple_files=True,
 )
 
@@ -113,13 +113,13 @@ col_close_curve, col_open_curve = st.columns(2)
 with col_close_curve:
     closing_curve_name = st.text_input(
         "Closing curve name",
-        help="Goes into column C of CURVE_ID_PARAM.xlsx for rows where "
+        help="Goes into column C of CURVE_ID_PARAM.csv for rows where "
         "VARIABLE_NAME == 'CLOSING_CURVE_ID'.",
     )
 with col_open_curve:
     opening_curve_name = st.text_input(
         "Opening curve name",
-        help="Goes into column C of CURVE_ID_PARAM.xlsx for rows where "
+        help="Goes into column C of CURVE_ID_PARAM.csv for rows where "
         "VARIABLE_NAME == 'OPENING_CURVE_ID'.",
     )
 
@@ -138,7 +138,7 @@ goc_seg_list = st.multiselect(
 
 st.info(
     "💡 **AOM Impact rows** — for every (GoC, year) found in the Ceded "
-    "file, the rows below are appended to `ACTUARIAL_AOM_IMPACT.xlsx`. "
+    "file, the rows below are appended to `ACTUARIAL_AOM_IMPACT.csv`. "
     "Use the `+` button at the bottom of the table to add a row, or "
     "the row's checkbox + Delete key to remove it.",
     icon="ℹ️",
@@ -153,12 +153,12 @@ aom_impact_df = st.data_editor(
         "STEP_ID": st.column_config.TextColumn(
             "STEP_ID",
             required=True,
-            help="Goes into column B of ACTUARIAL_AOM_IMPACT.xlsx.",
+            help="Goes into column B of ACTUARIAL_AOM_IMPACT.csv.",
         ),
         "Value": st.column_config.NumberColumn(
             "Value",
             required=True,
-            help="Goes into column C of ACTUARIAL_AOM_IMPACT.xlsx.",
+            help="Goes into column C of ACTUARIAL_AOM_IMPACT.csv.",
         ),
     },
     key="astra_aom_impact_editor",
@@ -227,6 +227,6 @@ if st.session_state.astra_run_id:
             label=f"⬇ {f.name}",
             data=f.read_bytes(),
             file_name=f.name,
-            mime=XLSX_MIME,
+            mime=CSV_MIME,
             key=str(f),
         )

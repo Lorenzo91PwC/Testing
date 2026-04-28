@@ -21,7 +21,7 @@ ROOT = Path(__file__).parent.parent
 RUNS_DIR = ROOT / "runs"
 RUNS_DIR.mkdir(exist_ok=True)
 
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+CSV_MIME = "text/csv"
 
 ENTITIES: list[tuple[int, str]] = [
     (14, "MPS"),
@@ -55,8 +55,8 @@ col_main, col_chat = st.columns([2, 1])
 with col_main:
     st.subheader("1. Upload input files")
     uploaded = st.file_uploader(
-        "Excel files",
-        type=["xlsx", "xlsm"],
+        "Excel or CSV files",
+        type=["xlsx", "xlsm", "csv"],
         accept_multiple_files=True,
     )
 
@@ -139,7 +139,7 @@ with col_main:
                 label=f"⬇ {f.name}",
                 data=f.read_bytes(),
                 file_name=f.name,
-                mime=XLSX_MIME,
+                mime=CSV_MIME,
                 key=str(f),
             )
 

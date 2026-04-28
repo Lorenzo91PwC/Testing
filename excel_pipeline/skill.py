@@ -15,7 +15,9 @@ Adding a new transformation (checklist):
 """
 from __future__ import annotations
 
+import csv
 from collections import OrderedDict
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +41,24 @@ def save_workbook(wb: Workbook, path: str) -> None:
 
 
 def list_run_files(run_dir: Path) -> list[Path]:
-    """List all .xlsx files in a run directory, sorted by name."""
-    return sorted(run_dir.glob("*.xlsx"))
+    """List all .csv files in a run directory, sorted by name."""
+    return sorted(run_dir.glob("*.csv"))
+
+
+def _read_csv_table(path: str) -> list[list[Any]]:
+    """Read a CSV into a list of rows; empty cells are normalised to ``None``."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        return [[(cell if cell != "" else None) for cell in row] for row in reader]
+
+
+def _write_csv_rows(path: str, rows: Iterable[Iterable[Any]]) -> None:
+    """Write rows to a CSV file (UTF-8 with BOM), creating parent dirs."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        for row in rows:
+            writer.writerow(["" if v is None else v for v in row])
 
 
 # ===========================================================================
@@ -179,26 +197,22 @@ def create_mp_lob(
     entity_id: int,
     output_path: str,
 ) -> dict[str, Any]:
-    """Create an ``MP_LoB`` workbook with two columns: ``GoC_ID`` and ``Entity_ID``.
+    """Create an ``MP_LoB`` CSV with two columns: ``GoC_ID`` and ``Entity_ID``.
 
     ``GoC_ID`` is filled with the supplied unique GoC names (typically the
     ``values`` result of ``extract_unique_goc_names``). ``Entity_ID`` is the
     selected entity code, repeated on every data row. Overwrites the
     output file if it already exists.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "MP_LoB"
-    ws.cell(row=1, column=1, value="GoC_ID")
-    ws.cell(row=1, column=2, value="Entity_ID")
-    for i, name in enumerate(goc_names, start=2):
-        ws.cell(row=i, column=1, value=name)
-        ws.cell(row=i, column=2, value=entity_id)
-    save_workbook(wb, output_path)
+    headers = ["GoC_ID", "Entity_ID"]
+    rows: list[list[Any]] = [headers]
+    for name in goc_names:
+        rows.append([name, entity_id])
+    _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
         "rows": len(goc_names),
-        "columns": ["GoC_ID", "Entity_ID"],
+        "columns": headers,
     }
 
 
@@ -207,7 +221,7 @@ def create_mp_observation_year(
     year: int,
     output_path: str,
 ) -> dict[str, Any]:
-    """Create an ``MP_ObservationYear`` workbook.
+    """Create an ``MP_ObservationYear`` CSV.
 
     Two rows are written per GoC — an ``Opening`` row (year - 1) and a
     ``Closing`` row (year). Columns: ``ObservationID`` (``{goc}@Opening``
@@ -215,30 +229,12 @@ def create_mp_observation_year(
     ``AdjULAEPagate`` (always ``0``), ``CY`` (always ``Yes``). Overwrites
     the output file if it already exists.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "MP_ObservationYear"
     headers = ["ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"]
-    for col, h in enumerate(headers, start=1):
-        ws.cell(row=1, column=col, value=h)
-
-    row = 2
+    rows: list[list[Any]] = [headers]
     for name in goc_names:
-        ws.cell(row=row, column=1, value=f"{name}@Opening")
-        ws.cell(row=row, column=2, value=year - 1)
-        ws.cell(row=row, column=3, value=name)
-        ws.cell(row=row, column=4, value=0)
-        ws.cell(row=row, column=5, value="Yes")
-        row += 1
-
-        ws.cell(row=row, column=1, value=f"{name}@Closing")
-        ws.cell(row=row, column=2, value=year)
-        ws.cell(row=row, column=3, value=name)
-        ws.cell(row=row, column=4, value=0)
-        ws.cell(row=row, column=5, value="Yes")
-        row += 1
-
-    save_workbook(wb, output_path)
+        rows.append([f"{name}@Opening", year - 1, name, 0, "Yes"])
+        rows.append([f"{name}@Closing", year, name, 0, "Yes"])
+    _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
         "rows": 2 * len(goc_names),
@@ -317,34 +313,24 @@ def create_risk_adjustment(
     values: dict[str, dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
-    """Create a ``Risk_Adjustment`` workbook with two columns.
+    """Create a ``Risk_Adjustment`` CSV with two columns.
 
     ``ObservationID`` follows the ``{goc}@Opening`` / ``{goc}@Closing``
     pattern; ``Risk_Adjustment`` pulls from ``values`` (the dict returned
     by ``lookup_risk_adjustment_values``). Missing values are written as
     empty cells. Overwrites the output file if it already exists.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Risk_Adjustment"
-    ws.cell(row=1, column=1, value="ObservationID")
-    ws.cell(row=1, column=2, value="Risk_Adjustment")
-
-    row = 2
+    headers = ["ObservationID", "Risk_Adjustment"]
+    rows: list[list[Any]] = [headers]
     for name in goc_names:
         vals = values.get(name, {"opening": None, "closing": None})
-        ws.cell(row=row, column=1, value=f"{name}@Opening")
-        ws.cell(row=row, column=2, value=vals.get("opening"))
-        row += 1
-        ws.cell(row=row, column=1, value=f"{name}@Closing")
-        ws.cell(row=row, column=2, value=vals.get("closing"))
-        row += 1
-
-    save_workbook(wb, output_path)
+        rows.append([f"{name}@Opening", vals.get("opening")])
+        rows.append([f"{name}@Closing", vals.get("closing")])
+    _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
         "rows": 2 * len(goc_names),
-        "columns": ["ObservationID", "Risk_Adjustment"],
+        "columns": headers,
     }
 
 
@@ -437,24 +423,18 @@ def create_payment_pattern(
     rows: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
-    """Create a ``Payment_pattern`` workbook with 25 columns.
+    """Create a ``Payment_pattern`` CSV with 25 columns.
 
     Columns: ``GoC``, ``Year`` and then ``'0'`` through ``'22'``. ``rows``
     is typically the list returned by ``lookup_payment_pattern_values``.
     Missing values produce empty cells. Overwrites the output file.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Payment_pattern"
     headers = ["GoC", "Year"] + [str(i) for i in range(PAYMENT_PATTERN_COLUMN_COUNT)]
-    for col, h in enumerate(headers, start=1):
-        ws.cell(row=1, column=col, value=h)
-    for r, row in enumerate(rows, start=2):
-        ws.cell(row=r, column=1, value=row["goc"])
-        ws.cell(row=r, column=2, value=row["year"])
-        for c, v in enumerate(row.get("values", []), start=3):
-            ws.cell(row=r, column=c, value=v)
-    save_workbook(wb, output_path)
+    out_rows: list[list[Any]] = [headers]
+    for row in rows:
+        values = list(row.get("values", []))
+        out_rows.append([row["goc"], row["year"], *values])
+    _write_csv_rows(output_path, out_rows)
     return {
         "output_path": output_path,
         "rows": len(rows),
@@ -471,7 +451,7 @@ def update_curve_id_param(
     closing_curve_name: str,
     opening_curve_name: str,
 ) -> dict[str, Any]:
-    """Fill column C of CURVE_ID_PARAM.xlsx based on the VARIABLE_NAME.
+    """Fill column C of CURVE_ID_PARAM.csv based on the VARIABLE_NAME.
 
     The input has three columns: ``GOC_ID`` (A), ``VARIABLE_NAME`` (B),
     a value column (C) — typically empty in the source. For each data
@@ -484,26 +464,32 @@ def update_curve_id_param(
     Rows whose VARIABLE_NAME is anything else are left untouched, so any
     other historical content in the file passes through unchanged.
     """
-    wb = openpyxl.load_workbook(input_path)
-    ws = wb.active
+    table = _read_csv_table(input_path)
+    if not table:
+        _write_csv_rows(output_path, [])
+        return {"output_path": output_path, "rows_updated": 0}
 
     rows_updated = 0
-    for r in range(2, ws.max_row + 1):
-        variable_name = ws.cell(row=r, column=2).value
-        if variable_name is None:
-            continue
-        key = str(variable_name).strip()
-        if key == "CLOSING_CURVE_ID":
-            ws.cell(row=r, column=3, value=closing_curve_name)
-            rows_updated += 1
-        elif key == "OPENING_CURVE_ID":
-            ws.cell(row=r, column=3, value=opening_curve_name)
-            rows_updated += 1
-        elif key == "CREDITED_RATE_CURVE_ID":
-            ws.cell(row=r, column=3, value=ws.cell(row=r, column=1).value)
-            rows_updated += 1
+    out_rows: list[list[Any]] = [table[0]]
+    for row in table[1:]:
+        row = list(row)
+        while len(row) < 3:
+            row.append(None)
+        variable_name = row[1]
+        if variable_name is not None:
+            key = str(variable_name).strip()
+            if key == "CLOSING_CURVE_ID":
+                row[2] = closing_curve_name
+                rows_updated += 1
+            elif key == "OPENING_CURVE_ID":
+                row[2] = opening_curve_name
+                rows_updated += 1
+            elif key == "CREDITED_RATE_CURVE_ID":
+                row[2] = row[0]
+                rows_updated += 1
+        out_rows.append(row)
 
-    save_workbook(wb, output_path)
+    _write_csv_rows(output_path, out_rows)
     return {
         "output_path": output_path,
         "rows_updated": rows_updated,
@@ -516,7 +502,7 @@ def append_actuarial_aom_impact(
     pairs: list[dict[str, Any]],
     step_id_value_pairs: list[tuple[str, Any]],
 ) -> dict[str, Any]:
-    """Append new rows to ACTUARIAL_AOM_IMPACT.xlsx and sort by A then B.
+    """Append new rows to ACTUARIAL_AOM_IMPACT.csv and sort by A then B.
 
     The file is treated as an append-only history. Existing rows are
     preserved verbatim. For each ``(goc, cohort_year)`` pair (typically
@@ -530,38 +516,36 @@ def append_actuarial_aom_impact(
     but left empty for newly appended rows. ``step_id_value_pairs`` with
     blank STEP_ID strings are skipped.
     """
-    wb = openpyxl.load_workbook(input_path)
-    ws = wb.active
-    n_cols = max(ws.max_column, 3)
+    table = _read_csv_table(input_path)
+    if not table:
+        header: list[Any] = ["GOC_ID", "STEP_ID", 1]
+        existing: list[list[Any]] = []
+        n_cols = 3
+    else:
+        header = list(table[0])
+        n_cols = max(len(header), 3)
+        existing = []
+        for raw in table[1:]:
+            row = list(raw)
+            while len(row) < n_cols:
+                row.append(None)
+            if any(v is not None for v in row):
+                existing.append(row)
 
-    # Read existing rows (skip purely-empty rows that openpyxl may report)
-    existing: list[tuple[Any, ...]] = []
-    for r in range(2, ws.max_row + 1):
-        row = tuple(ws.cell(row=r, column=c).value for c in range(1, n_cols + 1))
-        if any(v is not None for v in row):
-            existing.append(row)
-
-    # Build new rows
     cleaned_pairs = [
         (str(step).strip(), value)
         for step, value in step_id_value_pairs
         if step is not None and str(step).strip()
     ]
-    new_rows: list[tuple[Any, ...]] = []
+    new_rows: list[list[Any]] = []
     for pair in pairs:
         for step_id, value in cleaned_pairs:
-            row = (pair["goc_id"], step_id, value) + (None,) * (n_cols - 3)
-            new_rows.append(row)
+            new_rows.append([pair["goc_id"], step_id, value] + [None] * (n_cols - 3))
 
     combined = existing + new_rows
     combined.sort(key=lambda r: (str(r[0] or ""), str(r[1] or "")))
 
-    # Rewrite from row 2 onward
-    for i, row in enumerate(combined, start=2):
-        for c, v in enumerate(row, start=1):
-            ws.cell(row=i, column=c, value=v)
-
-    save_workbook(wb, output_path)
+    _write_csv_rows(output_path, [header, *combined])
     return {
         "output_path": output_path,
         "rows_appended": len(new_rows),
@@ -574,7 +558,7 @@ def update_mp_goc_seg(
     output_path: str,
     health_perimeter_gocs: list[str],
 ) -> dict[str, Any]:
-    """Apply the Health-perimeter rewrite to MP_GOC_SEG.xlsx.
+    """Apply the Health-perimeter rewrite to MP_GOC_SEG.csv.
 
     The input has four columns: ``GOC_SEG_ID`` (A), ``GOC_ID`` (B),
     ``SEG_ID`` (C), ``ALLOCATION_RATIO`` (D), plus a header row. For
@@ -582,36 +566,45 @@ def update_mp_goc_seg(
     column B; if it appears in ``health_perimeter_gocs`` the substring
     ``'P&C'`` is replaced with ``'HLTH_PC'`` in columns A and C.
     Columns B and D, plus rows whose GoC is outside the perimeter, are
-    left untouched. The workbook is saved to ``output_path``.
+    left untouched. The file is saved to ``output_path``.
     """
     perimeter = {g.strip() for g in health_perimeter_gocs if g and g.strip()}
 
-    wb = openpyxl.load_workbook(input_path)
-    ws = wb.active
+    table = _read_csv_table(input_path)
+    if not table:
+        _write_csv_rows(output_path, [])
+        return {"output_path": output_path, "rows_in_perimeter": 0}
 
     rows_changed = 0
-    for r in range(2, ws.max_row + 1):
-        goc_id_v = ws.cell(row=r, column=2).value
+    out_rows: list[list[Any]] = [table[0]]
+    for raw in table[1:]:
+        row = list(raw)
+        while len(row) < 4:
+            row.append(None)
+
+        goc_id_v = row[1]
         if goc_id_v is None:
+            out_rows.append(row)
             continue
         normalized = str(goc_id_v).strip()
         if len(normalized) < GOC_NAME_LENGTH:
-            continue  # GoC code is the first 11 chars; shorter values are skipped
+            out_rows.append(row)
+            continue
         goc_name = normalized[:GOC_NAME_LENGTH]
         if goc_name not in perimeter:
+            out_rows.append(row)
             continue
 
-        col_a = ws.cell(row=r, column=1).value
+        col_a = row[0]
         if isinstance(col_a, str) and "P&C" in col_a:
-            ws.cell(row=r, column=1, value=col_a.replace("P&C", "HLTH_PC"))
-
-        col_c = ws.cell(row=r, column=3).value
+            row[0] = col_a.replace("P&C", "HLTH_PC")
+        col_c = row[2]
         if isinstance(col_c, str) and "P&C" in col_c:
-            ws.cell(row=r, column=3, value=col_c.replace("P&C", "HLTH_PC"))
-
+            row[2] = col_c.replace("P&C", "HLTH_PC")
         rows_changed += 1
+        out_rows.append(row)
 
-    save_workbook(wb, output_path)
+    _write_csv_rows(output_path, out_rows)
     return {
         "output_path": output_path,
         "rows_in_perimeter": rows_changed,
@@ -624,13 +617,14 @@ def update_projection_parameters_entity(
     year: int,
     semester: int,
 ) -> dict[str, Any]:
-    """Apply rule-based edits to PROJECTION_PARAMETERS_ENTITY.xlsx.
+    """Apply rule-based edits to PROJECTION_PARAMETERS_ENTITY.csv.
 
     The input has two columns (``PARAMETER``, ``VALUE``) plus a header
     row. The function rewrites a fixed set of VALUE cells based on the
     analysis ``year`` and ``semester`` (1 = H1 = June, 2 = H2 = December),
-    then saves the workbook to ``output_path``. Other rows and the
-    workbook structure are preserved.
+    then saves to ``output_path``. Other rows are preserved. The output
+    is contractually two columns; any extra columns in the input are
+    dropped.
 
     Edits applied (parameter -> new value):
 
@@ -670,25 +664,30 @@ def update_projection_parameters_entity(
         "FX_REPORTING_DATE": report_date,
     }
 
-    wb = openpyxl.load_workbook(input_path)
-    ws = wb.active
+    table = _read_csv_table(input_path)
+    if not table:
+        _write_csv_rows(output_path, [])
+        return {"output_path": output_path, "parameters_updated": [], "rows_updated": 0}
+
+    header = list(table[0])[:2]
+    while len(header) < 2:
+        header.append(None)
 
     applied: list[str] = []
-    for r in range(2, ws.max_row + 1):
-        param = ws.cell(row=r, column=1).value
-        if param is None:
-            continue
-        key = str(param).strip()
-        if key in updates:
-            ws.cell(row=r, column=2, value=updates[key])
-            applied.append(key)
+    out_rows: list[list[Any]] = [header]
+    for raw in table[1:]:
+        row = list(raw)[:2]
+        while len(row) < 2:
+            row.append(None)
+        param = row[0]
+        if param is not None:
+            key = str(param).strip()
+            if key in updates:
+                row[1] = updates[key]
+                applied.append(key)
+        out_rows.append(row)
 
-    # Defensive: the file is contractually two columns. Drop anything past
-    # column B (e.g. a leftover annotation column from a draft).
-    if ws.max_column > 2:
-        ws.delete_cols(3, ws.max_column - 2)
-
-    save_workbook(wb, output_path)
+    _write_csv_rows(output_path, out_rows)
     return {
         "output_path": output_path,
         "parameters_updated": applied,
@@ -696,19 +695,13 @@ def update_projection_parameters_entity(
     }
 
 
-def create_empty_workbook(
-    output_path: str,
-    sheet_name: str = "Sheet1",
-) -> dict[str, Any]:
-    """Create a workbook containing a single empty sheet.
+def create_empty_csv(output_path: str) -> dict[str, Any]:
+    """Create an empty CSV file (zero rows, zero columns).
 
     Used as a placeholder until population rules for an output file are
     defined. Overwrites the output file if it already exists.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet_name
-    save_workbook(wb, output_path)
+    _write_csv_rows(output_path, [])
     return {"output_path": output_path, "rows": 0, "columns": []}
 
 
@@ -720,7 +713,7 @@ def create_new_business_ppos(
     pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
-    """Create a ``NEW_BUSINESS_PPOS`` workbook with three columns.
+    """Create a ``NEW_BUSINESS_PPOS`` CSV with three columns.
 
     One row per ``(goc, cohort_year)`` pair, in pair order. Pairs come
     from ``extract_unique_goc_cohort_pairs`` and are typically already
@@ -733,19 +726,11 @@ def create_new_business_ppos(
 
     Overwrites the output file if it already exists.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "NEW_BUSINESS_PPOS"
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="VARIABLE_NAME")
-    ws.cell(row=1, column=3, value=1)
-
-    for r, pair in enumerate(pairs, start=2):
-        ws.cell(row=r, column=1, value=pair["goc_id"])
-        ws.cell(row=r, column=2, value="CROSS_SUB_FASSCHNG")
-        ws.cell(row=r, column=3, value=0)
-
-    save_workbook(wb, output_path)
+    headers: list[Any] = ["GOC_ID", "VARIABLE_NAME", 1]
+    rows: list[list[Any]] = [headers]
+    for pair in pairs:
+        rows.append([pair["goc_id"], "CROSS_SUB_FASSCHNG", 0])
+    _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
         "rows": len(pairs),
@@ -757,7 +742,7 @@ def create_coverage_unit(
     pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
-    """Create a ``COVERAGE_UNIT`` workbook with 102 columns.
+    """Create a ``COVERAGE_UNIT`` CSV with 102 columns.
 
     One row per ``(goc, cohort_year)`` pair, in pair order.
 
@@ -768,26 +753,17 @@ def create_coverage_unit(
 
     Overwrites the output file if it already exists.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "COVERAGE_UNIT"
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="PROJECTION_PERIOD")
-    for i in range(1, COVERAGE_UNIT_PROJECTION_COLUMN_COUNT + 1):
-        ws.cell(row=1, column=2 + i, value=i)
-
-    for r, pair in enumerate(pairs, start=2):
-        ws.cell(row=r, column=1, value=pair["goc_id"])
-        ws.cell(row=r, column=2, value=1)
-        for i in range(COVERAGE_UNIT_PROJECTION_COLUMN_COUNT):
-            ws.cell(row=r, column=3 + i, value=0)
-
-    save_workbook(wb, output_path)
+    period_range = list(range(1, COVERAGE_UNIT_PROJECTION_COLUMN_COUNT + 1))
+    header: list[Any] = ["GOC_ID", "PROJECTION_PERIOD", *period_range]
+    rows: list[list[Any]] = [header]
+    for pair in pairs:
+        rows.append([pair["goc_id"], 1, *([0] * COVERAGE_UNIT_PROJECTION_COLUMN_COUNT)])
+    _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
         "rows": len(pairs),
         "columns": ["GOC_ID", "PROJECTION_PERIOD"]
-        + [str(i) for i in range(1, COVERAGE_UNIT_PROJECTION_COLUMN_COUNT + 1)],
+        + [str(i) for i in period_range],
     }
 
 
@@ -817,7 +793,7 @@ def create_reinsurance(
     pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
-    """Create a ``REINSURANCE`` workbook with four columns.
+    """Create a ``REINSURANCE`` CSV with four columns.
 
     Pairs are grouped by GoC (preserving first-seen order). For each
     GoC, all ``LOSSRECO_IFE_ALLOCATION`` rows are emitted first (one
@@ -835,25 +811,12 @@ def create_reinsurance(
     for p in pairs:
         grouped.setdefault(p["goc"], []).append(p)
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "REINSURANCE"
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="VARIABLE_NAME")
-    ws.cell(row=1, column=3, value=1)
-    ws.cell(row=1, column=4, value="T")
-
-    row = 2
+    rows: list[list[Any]] = [["GOC_ID", "VARIABLE_NAME", 1, "T"]]
     for goc_pairs in grouped.values():
         for variable_name in REINSURANCE_VARIABLE_NAMES:
             for pair in goc_pairs:
-                ws.cell(row=row, column=1, value=pair["goc_id"])
-                ws.cell(row=row, column=2, value=variable_name)
-                ws.cell(row=row, column=3, value=0)
-                ws.cell(row=row, column=4, value=pair["year"])
-                row += 1
-
-    save_workbook(wb, output_path)
+                rows.append([pair["goc_id"], variable_name, 0, pair["year"]])
+    _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
         "rows": len(pairs) * len(REINSURANCE_VARIABLE_NAMES),
@@ -865,7 +828,7 @@ def create_mandatory_actuals(
     pairs: list[dict[str, Any]],
     output_path: str,
 ) -> dict[str, Any]:
-    """Create a ``MANDATORY_ACTUALS`` workbook with three columns.
+    """Create a ``MANDATORY_ACTUALS`` CSV with three columns.
 
     Pairs are grouped by GoC (preserving first-seen order). For each
     GoC, for each pair of that GoC, the 16 fixed VARIABLE_NAMEs are
@@ -882,23 +845,12 @@ def create_mandatory_actuals(
     for p in pairs:
         grouped.setdefault(p["goc"], []).append(p)
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "MANDATORY_ACTUALS"
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="VARIABLE_NAME")
-    ws.cell(row=1, column=3, value=1)
-
-    row = 2
+    rows: list[list[Any]] = [["GOC_ID", "VARIABLE_NAME", 1]]
     for goc_pairs in grouped.values():
         for pair in goc_pairs:
             for variable_name in MANDATORY_ACTUALS_VARIABLE_NAMES:
-                ws.cell(row=row, column=1, value=pair["goc_id"])
-                ws.cell(row=row, column=2, value=variable_name)
-                ws.cell(row=row, column=3, value=0)
-                row += 1
-
-    save_workbook(wb, output_path)
+                rows.append([pair["goc_id"], variable_name, 0])
+    _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
         "rows": len(pairs) * len(MANDATORY_ACTUALS_VARIABLE_NAMES),
@@ -1027,7 +979,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 },
                 "output_path": {
                     "type": "string",
-                    "description": "Absolute path where MP_LoB.xlsx will be saved.",
+                    "description": "Absolute path where MP_LoB.csv will be saved.",
                 },
             },
             "required": ["goc_names", "entity_id", "output_path"],
@@ -1057,7 +1009,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 },
                 "output_path": {
                     "type": "string",
-                    "description": "Absolute path where MP_ObservationYear.xlsx will be saved.",
+                    "description": "Absolute path where MP_ObservationYear.csv will be saved.",
                 },
             },
             "required": ["goc_names", "year", "output_path"],

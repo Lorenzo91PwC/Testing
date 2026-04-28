@@ -1,6 +1,7 @@
 """Tests for excel_pipeline.skill."""
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import openpyxl
@@ -9,7 +10,7 @@ import pytest
 from excel_pipeline.skill import (
     MANDATORY_ACTUALS_VARIABLE_NAMES,
     create_coverage_unit,
-    create_empty_workbook,
+    create_empty_csv,
     create_mandatory_actuals,
     create_mp_lob,
     create_mp_observation_year,
@@ -31,6 +32,40 @@ from excel_pipeline.skill import (
 def _pair(goc: str, year: int) -> dict:
     """Helper for tests — mirrors extract_unique_goc_cohort_pairs output."""
     return {"goc_id": f"{goc}{year}", "goc": goc, "year": year}
+
+
+def _read_csv(path: Path) -> list[tuple]:
+    """Read CSV rows; coerce numeric cells to int/float, '' to None."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        rows: list[tuple] = []
+        for raw in reader:
+            cells = []
+            for cell in raw:
+                if cell == "":
+                    cells.append(None)
+                    continue
+                try:
+                    cells.append(int(cell))
+                    continue
+                except ValueError:
+                    pass
+                try:
+                    cells.append(float(cell))
+                    continue
+                except ValueError:
+                    pass
+                cells.append(cell)
+            rows.append(tuple(cells))
+        return rows
+
+
+def _write_csv(path: Path, rows: list[tuple]) -> None:
+    """Write rows to a CSV fixture (UTF-8 with BOM)."""
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        for row in rows:
+            writer.writerow(["" if v is None else v for v in row])
 
 
 def _build_ceded_fixture(path: Path) -> None:
@@ -87,7 +122,7 @@ def test_extract_unique_goc_names_custom_column_and_start_row(tmp_path: Path) ->
 
 
 def test_create_mp_lob(tmp_path: Path) -> None:
-    output = tmp_path / "MP_LoB.xlsx"
+    output = tmp_path / "MP_LoB.csv"
     goc_names = ["Motor", "Property", "Liability"]
 
     result = create_mp_lob(goc_names=goc_names, entity_id=6, output_path=str(output))
@@ -99,9 +134,7 @@ def test_create_mp_lob(tmp_path: Path) -> None:
     }
     assert output.exists()
 
-    wb = openpyxl.load_workbook(output)
-    ws = wb["MP_LoB"]
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GoC_ID", "Entity_ID"),
         ("Motor", 6),
@@ -113,7 +146,7 @@ def test_create_mp_lob(tmp_path: Path) -> None:
 def test_create_mp_lob_end_to_end(tmp_path: Path) -> None:
     ceded = tmp_path / "1.1_2025.12.31_AAI_P&C_Ceded.xlsx"
     _build_ceded_fixture(ceded)
-    output = tmp_path / "MP_LoB.xlsx"
+    output = tmp_path / "MP_LoB.csv"
 
     extracted = extract_unique_goc_names(str(ceded))
     create_mp_lob(
@@ -122,9 +155,7 @@ def test_create_mp_lob_end_to_end(tmp_path: Path) -> None:
         output_path=str(output),
     )
 
-    wb = openpyxl.load_workbook(output)
-    ws = wb["MP_LoB"]
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GoC_ID", "Entity_ID"),
         ("Motor", 14),
@@ -134,7 +165,7 @@ def test_create_mp_lob_end_to_end(tmp_path: Path) -> None:
 
 
 def test_create_mp_observation_year(tmp_path: Path) -> None:
-    output = tmp_path / "MP_ObservationYear.xlsx"
+    output = tmp_path / "MP_ObservationYear.csv"
     goc_names = ["Motor", "Property"]
 
     result = create_mp_observation_year(
@@ -153,9 +184,7 @@ def test_create_mp_observation_year(tmp_path: Path) -> None:
         ],
     }
 
-    wb = openpyxl.load_workbook(output)
-    ws = wb["MP_ObservationYear"]
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
         ("Motor@Opening", 2024, "Motor", 0, "Yes"),
@@ -166,16 +195,14 @@ def test_create_mp_observation_year(tmp_path: Path) -> None:
 
 
 def test_create_mp_observation_year_empty(tmp_path: Path) -> None:
-    output = tmp_path / "MP_ObservationYear.xlsx"
+    output = tmp_path / "MP_ObservationYear.csv"
 
     result = create_mp_observation_year(
         goc_names=[], year=2025, output_path=str(output),
     )
 
     assert result["rows"] == 0
-    wb = openpyxl.load_workbook(output)
-    ws = wb["MP_ObservationYear"]
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
     ]
@@ -267,7 +294,7 @@ def test_lookup_risk_adjustment_values_missing_year_column(tmp_path: Path) -> No
 
 
 def test_create_risk_adjustment(tmp_path: Path) -> None:
-    output = tmp_path / "Risk_Adjustment.xlsx"
+    output = tmp_path / "Risk_Adjustment.csv"
     goc_names = ["Motor", "Property"]
     values = {
         "Motor": {"opening": 110, "closing": 130},
@@ -284,8 +311,7 @@ def test_create_risk_adjustment(tmp_path: Path) -> None:
         "columns": ["ObservationID", "Risk_Adjustment"],
     }
 
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["Risk_Adjustment"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("ObservationID", "Risk_Adjustment"),
         ("Motor@Opening", 110),
@@ -296,15 +322,14 @@ def test_create_risk_adjustment(tmp_path: Path) -> None:
 
 
 def test_create_risk_adjustment_missing_values_become_empty(tmp_path: Path) -> None:
-    output = tmp_path / "Risk_Adjustment.xlsx"
+    output = tmp_path / "Risk_Adjustment.csv"
     values = {"Motor": {"opening": None, "closing": None}}
 
     create_risk_adjustment(
         goc_names=["Motor"], values=values, output_path=str(output),
     )
 
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["Risk_Adjustment"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("ObservationID", "Risk_Adjustment"),
         ("Motor@Opening", None),
@@ -411,7 +436,7 @@ def test_lookup_payment_pattern_values_fewer_than_23_columns(tmp_path: Path) -> 
 
 
 def test_create_payment_pattern(tmp_path: Path) -> None:
-    output = tmp_path / "Payment_pattern.xlsx"
+    output = tmp_path / "Payment_pattern.csv"
     rows = [
         {"goc": "Motor", "year": 2025, "values": [i for i in range(23)]},
         {"goc": "Motor", "year": 2024, "values": [i * 10 for i in range(23)]},
@@ -426,18 +451,18 @@ def test_create_payment_pattern(tmp_path: Path) -> None:
         "columns": expected_headers,
     }
 
-    wb = openpyxl.load_workbook(output)
-    ws = wb["Payment_pattern"]
-    written = list(ws.iter_rows(values_only=True))
-    assert written[0] == tuple(expected_headers)
+    written = _read_csv(output)
+    # CSV reader returns header column "0".."22" as ints via the int-coercion;
+    # compare on string form to be unambiguous.
+    assert written[0] == ("GoC", "Year") + tuple(range(23))
     assert written[1] == ("Motor", 2025) + tuple(range(23))
     assert written[2] == ("Motor", 2024) + tuple(i * 10 for i in range(23))
 
 
-def test_create_empty_workbook(tmp_path: Path) -> None:
-    output = tmp_path / "Empty.xlsx"
+def test_create_empty_csv(tmp_path: Path) -> None:
+    output = tmp_path / "Empty.csv"
 
-    result = create_empty_workbook(str(output), sheet_name="Astra_Placeholder")
+    result = create_empty_csv(str(output))
 
     assert result == {
         "output_path": str(output),
@@ -445,11 +470,7 @@ def test_create_empty_workbook(tmp_path: Path) -> None:
         "columns": [],
     }
     assert output.exists()
-
-    wb = openpyxl.load_workbook(output)
-    assert wb.sheetnames == ["Astra_Placeholder"]
-    ws = wb["Astra_Placeholder"]
-    assert list(ws.iter_rows(values_only=True)) == []
+    assert _read_csv(output) == []
 
 
 def _build_ceded_with_year_fixture(path: Path, rows_data: list[tuple]) -> None:
@@ -499,7 +520,7 @@ def test_extract_unique_goc_cohort_pairs(tmp_path: Path) -> None:
 
 
 def test_create_new_business_ppos(tmp_path: Path) -> None:
-    output = tmp_path / "NEW_BUSINESS_PPOS.xlsx"
+    output = tmp_path / "NEW_BUSINESS_PPOS.csv"
     pairs = [_pair("IT05PABPPLE", 2024), _pair("IT05PABPPLE", 2023), _pair("IT06ABCDE", 2024)]
 
     result = create_new_business_ppos(pairs=pairs, output_path=str(output))
@@ -510,8 +531,7 @@ def test_create_new_business_ppos(tmp_path: Path) -> None:
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["NEW_BUSINESS_PPOS"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
@@ -521,18 +541,17 @@ def test_create_new_business_ppos(tmp_path: Path) -> None:
 
 
 def test_create_new_business_ppos_empty_pairs(tmp_path: Path) -> None:
-    output = tmp_path / "NEW_BUSINESS_PPOS.xlsx"
+    output = tmp_path / "NEW_BUSINESS_PPOS.csv"
 
     result = create_new_business_ppos(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["NEW_BUSINESS_PPOS"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]
 
 
 def test_create_coverage_unit(tmp_path: Path) -> None:
-    output = tmp_path / "COVERAGE_UNIT.xlsx"
+    output = tmp_path / "COVERAGE_UNIT.csv"
     pairs = [_pair("IT05PABPPLE", 2024), _pair("IT06ABCDE", 2024)]
 
     result = create_coverage_unit(pairs=pairs, output_path=str(output))
@@ -544,8 +563,7 @@ def test_create_coverage_unit(tmp_path: Path) -> None:
         "columns": expected_columns,
     }
 
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["COVERAGE_UNIT"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
     assert rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
     assert rows[2] == ("IT06ABCDE2024", 1) + (0,) * 100
@@ -553,7 +571,7 @@ def test_create_coverage_unit(tmp_path: Path) -> None:
 
 
 def test_create_reinsurance(tmp_path: Path) -> None:
-    output = tmp_path / "REINSURANCE.xlsx"
+    output = tmp_path / "REINSURANCE.csv"
     pairs = [
         _pair("IT05PABPPLE", 2024),
         _pair("IT05PABPPLE", 2023),
@@ -568,34 +586,30 @@ def test_create_reinsurance(tmp_path: Path) -> None:
         "columns": ["GOC_ID", "VARIABLE_NAME", "1", "T"],
     }
 
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["REINSURANCE"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1, "T"),
-        # First GoC: 2 IFE rows (one per pair of that GoC), then 2 CLOSING rows
         ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
         ("IT05PABPPLE2023", "LOSSRECO_IFE_ALLOCATION", 0, 2023),
         ("IT05PABPPLE2024", "LOSSRECO_CLOSING", 0, 2024),
         ("IT05PABPPLE2023", "LOSSRECO_CLOSING", 0, 2023),
-        # Second GoC: 1 IFE then 1 CLOSING
         ("IT06ABCDE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
         ("IT06ABCDE2024", "LOSSRECO_CLOSING", 0, 2024),
     ]
 
 
 def test_create_reinsurance_empty_pairs(tmp_path: Path) -> None:
-    output = tmp_path / "REINSURANCE.xlsx"
+    output = tmp_path / "REINSURANCE.csv"
 
     result = create_reinsurance(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["REINSURANCE"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1, "T")]
 
 
 def test_create_mandatory_actuals(tmp_path: Path) -> None:
-    output = tmp_path / "MANDATORY_ACTUALS.xlsx"
+    output = tmp_path / "MANDATORY_ACTUALS.csv"
     assert len(MANDATORY_ACTUALS_VARIABLE_NAMES) == 16  # guard the spec
     pairs = [
         _pair("IT05PABPPLE", 2024),
@@ -611,24 +625,20 @@ def test_create_mandatory_actuals(tmp_path: Path) -> None:
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["MANDATORY_ACTUALS"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
     assert len(rows) == 1 + 3 * 16
 
-    # First pair (IT05PABPPLE2024): 16 variables in order
     expected_first = [
         ("IT05PABPPLE2024", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
     ]
     assert rows[1:17] == expected_first
 
-    # Second pair (IT05PABPPLE2023): 16 variables in order
     expected_second = [
         ("IT05PABPPLE2023", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
     ]
     assert rows[17:33] == expected_second
 
-    # Third pair (IT06ABCDE2024): 16 variables in order
     expected_third = [
         ("IT06ABCDE2024", v, 0) for v in MANDATORY_ACTUALS_VARIABLE_NAMES
     ]
@@ -636,13 +646,12 @@ def test_create_mandatory_actuals(tmp_path: Path) -> None:
 
 
 def test_create_mandatory_actuals_empty_pairs(tmp_path: Path) -> None:
-    output = tmp_path / "MANDATORY_ACTUALS.xlsx"
+    output = tmp_path / "MANDATORY_ACTUALS.csv"
 
     result = create_mandatory_actuals(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
-    wb = openpyxl.load_workbook(output)
-    rows = list(wb["MANDATORY_ACTUALS"].iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]
 
 
@@ -670,19 +679,14 @@ PROJECTION_PARAMS_INPUT_ROWS = [
 
 
 def _build_projection_parameters_fixture(path: Path) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="PARAMETER")
-    ws.cell(row=1, column=2, value="VALUE")
-    for i, (param, val) in enumerate(PROJECTION_PARAMS_INPUT_ROWS, start=2):
-        ws.cell(row=i, column=1, value=param)
-        ws.cell(row=i, column=2, value=val)
-    wb.save(path)
+    rows: list[tuple] = [("PARAMETER", "VALUE")]
+    rows.extend(PROJECTION_PARAMS_INPUT_ROWS)
+    _write_csv(path, rows)
 
 
 def test_update_projection_parameters_entity_h2_2025(tmp_path: Path) -> None:
-    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.csv"
+    output = tmp_path / "out.csv"
     _build_projection_parameters_fixture(fixture)
 
     result = update_projection_parameters_entity(
@@ -702,32 +706,29 @@ def test_update_projection_parameters_entity_h2_2025(tmp_path: Path) -> None:
         "FX_REPORTING_DATE",
     }
 
-    wb = openpyxl.load_workbook(output)
-    ws = wb.active
-    by_param = {
-        ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
-        for r in range(2, ws.max_row + 1)
-    }
+    rows = _read_csv(output)
+    by_param = {row[0]: row[1] for row in rows[1:]}
     # Edits applied
     assert by_param["CF_TIMESTEP"] == "YEARLY"
     assert by_param["REPORTING_MONTH"] == "12_DECEMBER"
     assert by_param["FX_OPENING_DATE"] == "1M25"
     assert by_param["FX_AVERAGE_DATE"] == "HY25"
     assert by_param["FX_CLOSING_DATE"] == "FY25"
-    assert by_param["FX_REPORTING_DATE"] == "20251231"
+    # CSV doesn't preserve the str/int distinction; the int-coercion in _read_csv
+    # turns "20251231" into int 20251231.
+    assert by_param["FX_REPORTING_DATE"] == 20251231
     # Unchanged values
     assert by_param["PROJECTED_PERIODS"] == 110
     assert by_param["SCENARIO_TIMESTEP"] == "YEARLY"
     assert by_param["FX_MANAGEMENT"] == "CENTRAL"
     assert by_param["OCI_OPTION_CF"] == "USE_EXISTING_INPUT"
     # Header preserved
-    assert ws.cell(row=1, column=1).value == "PARAMETER"
-    assert ws.cell(row=1, column=2).value == "VALUE"
+    assert rows[0] == ("PARAMETER", "VALUE")
 
 
 def test_update_projection_parameters_entity_h1_2025(tmp_path: Path) -> None:
-    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.csv"
+    output = tmp_path / "out.csv"
     _build_projection_parameters_fixture(fixture)
 
     update_projection_parameters_entity(
@@ -737,33 +738,27 @@ def test_update_projection_parameters_entity_h1_2025(tmp_path: Path) -> None:
         semester=1,
     )
 
-    wb = openpyxl.load_workbook(output)
-    ws = wb.active
-    by_param = {
-        ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
-        for r in range(2, ws.max_row + 1)
-    }
+    rows = _read_csv(output)
+    by_param = {row[0]: row[1] for row in rows[1:]}
     assert by_param["REPORTING_MONTH"] == "6_JUNE"
     assert by_param["FX_AVERAGE_DATE"] == "Q125"
     assert by_param["FX_CLOSING_DATE"] == "HY25"
-    assert by_param["FX_REPORTING_DATE"] == "20250630"
+    assert by_param["FX_REPORTING_DATE"] == 20250630
     assert by_param["FX_OPENING_DATE"] == "1M25"
     assert by_param["CF_TIMESTEP"] == "YEARLY"
 
 
 def test_update_projection_parameters_entity_drops_extra_columns(tmp_path: Path) -> None:
     """Even if the input has a stray third column, the output is 2-column."""
-    fixture = tmp_path / "input.xlsx"
-    output = tmp_path / "out.xlsx"
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="PARAMETER")
-    ws.cell(row=1, column=2, value="VALUE")
-    ws.cell(row=1, column=3, value="Notes")  # stray column to be dropped
-    ws.cell(row=2, column=1, value="CF_TIMESTEP")
-    ws.cell(row=2, column=2, value="SEMESTRIAL")
-    ws.cell(row=2, column=3, value="should disappear")
-    wb.save(fixture)
+    fixture = tmp_path / "input.csv"
+    output = tmp_path / "out.csv"
+    _write_csv(
+        fixture,
+        [
+            ("PARAMETER", "VALUE", "Notes"),
+            ("CF_TIMESTEP", "SEMESTRIAL", "should disappear"),
+        ],
+    )
 
     update_projection_parameters_entity(
         input_path=str(fixture),
@@ -772,21 +767,20 @@ def test_update_projection_parameters_entity_drops_extra_columns(tmp_path: Path)
         semester=2,
     )
 
-    out_ws = openpyxl.load_workbook(output).active
-    assert out_ws.max_column == 2
-    assert out_ws.cell(row=1, column=1).value == "PARAMETER"
-    assert out_ws.cell(row=1, column=2).value == "VALUE"
-    assert out_ws.cell(row=2, column=2).value == "YEARLY"
+    rows = _read_csv(output)
+    assert all(len(r) == 2 for r in rows)
+    assert rows[0] == ("PARAMETER", "VALUE")
+    assert rows[1] == ("CF_TIMESTEP", "YEARLY")
 
 
 def test_update_projection_parameters_entity_invalid_semester(tmp_path: Path) -> None:
-    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx"
+    fixture = tmp_path / "PROJECTION_PARAMETERS_ENTITY.csv"
     _build_projection_parameters_fixture(fixture)
 
     with pytest.raises(ValueError, match="semester must be 1 or 2"):
         update_projection_parameters_entity(
             input_path=str(fixture),
-            output_path=str(tmp_path / "out.xlsx"),
+            output_path=str(tmp_path / "out.csv"),
             year=2025,
             semester=3,
         )
@@ -794,23 +788,14 @@ def test_update_projection_parameters_entity_invalid_semester(tmp_path: Path) ->
 
 def _build_mp_goc_seg_fixture(path: Path, rows: list[tuple]) -> None:
     """rows: list of (col_a, col_b, col_c, col_d). Header row is added."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="GOC_SEG_ID")
-    ws.cell(row=1, column=2, value="GOC_ID")
-    ws.cell(row=1, column=3, value="SEG_ID")
-    ws.cell(row=1, column=4, value="ALLOCATION_RATIO")
-    for i, (a, b, c, d) in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=a)
-        ws.cell(row=i, column=2, value=b)
-        ws.cell(row=i, column=3, value=c)
-        ws.cell(row=i, column=4, value=d)
-    wb.save(path)
+    out: list[tuple] = [("GOC_SEG_ID", "GOC_ID", "SEG_ID", "ALLOCATION_RATIO")]
+    out.extend(rows)
+    _write_csv(path, out)
 
 
 def test_update_mp_goc_seg_rewrites_only_perimeter_rows(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_mp_goc_seg_fixture(
         fixture,
         [
@@ -830,24 +815,20 @@ def test_update_mp_goc_seg_rewrites_only_perimeter_rows(tmp_path: Path) -> None:
 
     assert result == {"output_path": str(output), "rows_in_perimeter": 2}
 
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GOC_SEG_ID", "GOC_ID", "SEG_ID", "ALLOCATION_RATIO"),
-        # Outside perimeter -> unchanged
         ("IT05PABPPLE2025_02_P&C", "IT05PABPPLE2025", "02_P&C", 1),
         ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1),
-        # Inside perimeter -> A and C rewritten, B and D untouched
         ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1),
         ("IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1),
-        # Outside perimeter -> unchanged
         ("IT06ABCDE2024_02_P&C", "IT06ABCDE2024", "02_P&C", 1),
     ]
 
 
 def test_update_mp_goc_seg_empty_perimeter_changes_nothing(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_mp_goc_seg_fixture(
         fixture,
         [("IT05RRIEEBB2025_02_P&C", "IT05RRIEEBB2025", "02_P&C", 1)],
@@ -860,14 +841,13 @@ def test_update_mp_goc_seg_empty_perimeter_changes_nothing(tmp_path: Path) -> No
     )
 
     assert result["rows_in_perimeter"] == 0
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows[1] == ("IT05RRIEEBB2025_02_P&C", "IT05RRIEEBB2025", "02_P&C", 1)
 
 
 def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_mp_goc_seg_fixture(
         fixture,
         [
@@ -883,9 +863,7 @@ def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
         health_perimeter_gocs=["IT05RRIEEBB", "SHORT", ""],
     )
 
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
-    # Row 1 (IT05RRIEEBB) rewritten; rows 2 and 3 untouched
+    rows = _read_csv(output)
     assert rows[1] == ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1)
     assert rows[2] == ("X_02_P&C", "SHORT", "02_P&C", 1)
     assert rows[3] == ("Y_02_P&C", None, "02_P&C", 1)
@@ -893,21 +871,14 @@ def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
 
 def _build_aom_impact_fixture(path: Path, rows: list[tuple]) -> None:
     """rows: list of (goc_id, step_id, value). Header is added."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="STEP_ID")
-    ws.cell(row=1, column=3, value=1)
-    for i, (a, b, c) in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=a)
-        ws.cell(row=i, column=2, value=b)
-        ws.cell(row=i, column=3, value=c)
-    wb.save(path)
+    out: list[tuple] = [("GOC_ID", "STEP_ID", 1)]
+    out.extend(rows)
+    _write_csv(path, out)
 
 
 def test_append_actuarial_aom_impact_appends_and_sorts(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_aom_impact_fixture(
         fixture,
         [
@@ -940,13 +911,8 @@ def test_append_actuarial_aom_impact_appends_and_sorts(tmp_path: Path) -> None:
         "rows_total": 7,  # 3 existing + 4 new
     }
 
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
-
-    # Header preserved
+    rows = _read_csv(output)
     assert rows[0] == ("GOC_ID", "STEP_ID", 1)
-
-    # All 7 rows sorted by (A, B)
     assert rows[1:] == [
         ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
         ("IT05PABPPLE2024", "RA_LIC_OP", 0),
@@ -959,14 +925,13 @@ def test_append_actuarial_aom_impact_appends_and_sorts(tmp_path: Path) -> None:
 
 
 def test_append_actuarial_aom_impact_empty_inputs(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_aom_impact_fixture(
         fixture,
         [("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0)],
     )
 
-    # No pairs and no step_pairs -> nothing to append
     result = append_actuarial_aom_impact(
         input_path=str(fixture),
         output_path=str(output),
@@ -976,8 +941,7 @@ def test_append_actuarial_aom_impact_empty_inputs(tmp_path: Path) -> None:
     assert result["rows_appended"] == 0
     assert result["rows_total"] == 1
 
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GOC_ID", "STEP_ID", 1),
         ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
@@ -985,12 +949,11 @@ def test_append_actuarial_aom_impact_empty_inputs(tmp_path: Path) -> None:
 
 
 def test_append_actuarial_aom_impact_skips_blank_step_ids(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_aom_impact_fixture(fixture, [])
 
     pairs = [{"goc_id": "G2025", "goc": "G", "year": 2025}]
-    # Mix valid + blank/None step ids
     step_pairs = [
         ("STEP_A", 1),
         ("", 2),
@@ -1006,11 +969,9 @@ def test_append_actuarial_aom_impact_skips_blank_step_ids(tmp_path: Path) -> Non
         step_id_value_pairs=step_pairs,
     )
 
-    # Only 2 valid steps survive
     assert result["rows_appended"] == 2
 
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows[1:] == [
         ("G2025", "STEP_A", 1),
         ("G2025", "STEP_B", 5),
@@ -1019,21 +980,14 @@ def test_append_actuarial_aom_impact_skips_blank_step_ids(tmp_path: Path) -> Non
 
 def _build_curve_id_param_fixture(path: Path, rows: list[tuple]) -> None:
     """rows: list of (goc_id, variable_name, col_c). Header is added."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="VARIABLE_NAME")
-    ws.cell(row=1, column=3, value=1)
-    for i, (a, b, c) in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=a)
-        ws.cell(row=i, column=2, value=b)
-        ws.cell(row=i, column=3, value=c)
-    wb.save(path)
+    out: list[tuple] = [("GOC_ID", "VARIABLE_NAME", 1)]
+    out.extend(rows)
+    _write_csv(path, out)
 
 
 def test_update_curve_id_param_fills_known_variables(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_curve_id_param_fixture(
         fixture,
         [
@@ -1054,8 +1008,7 @@ def test_update_curve_id_param_fills_known_variables(tmp_path: Path) -> None:
 
     assert result == {"output_path": str(output), "rows_updated": 5}
 
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
@@ -1067,8 +1020,8 @@ def test_update_curve_id_param_fills_known_variables(tmp_path: Path) -> None:
 
 
 def test_update_curve_id_param_leaves_other_variables_untouched(tmp_path: Path) -> None:
-    fixture = tmp_path / "in.xlsx"
-    output = tmp_path / "out.xlsx"
+    fixture = tmp_path / "in.csv"
+    output = tmp_path / "out.csv"
     _build_curve_id_param_fixture(
         fixture,
         [
@@ -1087,8 +1040,7 @@ def test_update_curve_id_param_leaves_other_variables_untouched(tmp_path: Path) 
 
     assert result["rows_updated"] == 1
 
-    ws = openpyxl.load_workbook(output).active
-    rows = list(ws.iter_rows(values_only=True))
+    rows = _read_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),

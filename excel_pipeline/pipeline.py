@@ -18,7 +18,7 @@ from .skill import (
     ASTRA_COHORT_YEAR_SPAN,
     append_actuarial_aom_impact,
     create_coverage_unit,
-    create_empty_workbook,
+    create_empty_csv,
     create_mandatory_actuals,
     create_mp_lob,
     create_mp_observation_year,
@@ -67,7 +67,7 @@ def run_phase1(
     year: int,
     semester: int,
 ) -> dict[str, Any]:
-    """Phase 1: Ceded + Payment_Patterns -> four output workbooks.
+    """Phase 1: Ceded + Payment_Patterns -> four output CSVs.
 
     Picks the Ceded input file and extracts the unique GoC names from
     column AA of sheet ``AAI_P&C_Ceded_H_NH``. Picks the
@@ -75,12 +75,12 @@ def run_phase1(
     and Payment Pattern values (sheets ``ra_AAI_REINS`` and
     ``pp_AAI_REINS``) using ``year`` and ``semester``. Writes:
 
-    - ``{run_dir}/MP_LoB.xlsx`` — columns ``GoC_ID``, ``Entity_ID``.
-    - ``{run_dir}/MP_ObservationYear.xlsx`` — two rows per GoC
+    - ``{run_dir}/MP_LoB.csv`` — columns ``GoC_ID``, ``Entity_ID``.
+    - ``{run_dir}/MP_ObservationYear.csv`` — two rows per GoC
       (``@Opening`` with ``year-1`` and ``@Closing`` with ``year``).
-    - ``{run_dir}/Risk_Adjustment.xlsx`` — two rows per GoC with the
+    - ``{run_dir}/Risk_Adjustment.csv`` — two rows per GoC with the
       Opening/Closing Risk Adjustment values.
-    - ``{run_dir}/Payment_pattern.xlsx`` — 25 columns (``GoC``, ``Year``,
+    - ``{run_dir}/Payment_pattern.csv`` — 25 columns (``GoC``, ``Year``,
       ``0`` .. ``22``), two rows per GoC (``year`` and ``year-1``).
 
     Returns a dict with:
@@ -98,14 +98,14 @@ def run_phase1(
     ceded_path = _find_file_by_suffix(input_paths, CEDED_SUFFIX)
     goc_names = extract_unique_goc_names(str(ceded_path))["values"]
 
-    mp_lob_path = run_dir / "MP_LoB.xlsx"
+    mp_lob_path = run_dir / "MP_LoB.csv"
     create_mp_lob(
         goc_names=goc_names,
         entity_id=entity_id,
         output_path=str(mp_lob_path),
     )
 
-    mp_obs_path = run_dir / "MP_ObservationYear.xlsx"
+    mp_obs_path = run_dir / "MP_ObservationYear.csv"
     create_mp_observation_year(
         goc_names=goc_names,
         year=year,
@@ -119,7 +119,7 @@ def run_phase1(
         year=year,
         semester=semester,
     )
-    ra_path = run_dir / "Risk_Adjustment.xlsx"
+    ra_path = run_dir / "Risk_Adjustment.csv"
     create_risk_adjustment(
         goc_names=goc_names,
         values=ra_values,
@@ -132,7 +132,7 @@ def run_phase1(
         year=year,
         semester=semester,
     )
-    payment_pattern_path = run_dir / "Payment_pattern.xlsx"
+    payment_pattern_path = run_dir / "Payment_pattern.csv"
     create_payment_pattern(
         rows=pp_rows,
         output_path=str(payment_pattern_path),
@@ -171,27 +171,27 @@ def run_astra_phase1(
 
     Writes:
 
-    - ``{run_dir}/NEW_BUSINESS_PPOS.xlsx`` — one row per kept pair.
-    - ``{run_dir}/COVERAGE_UNIT.xlsx`` — one row per kept pair.
-    - ``{run_dir}/REINSURANCE.xlsx`` — two variables × N pairs per GoC.
-    - ``{run_dir}/MANDATORY_ACTUALS.xlsx`` — 16 variables × N pairs per GoC.
-    - ``{run_dir}/PROJECTION_PARAMETERS_ENTITY.xlsx`` — uploaded copy of
+    - ``{run_dir}/NEW_BUSINESS_PPOS.csv`` — one row per kept pair.
+    - ``{run_dir}/COVERAGE_UNIT.csv`` — one row per kept pair.
+    - ``{run_dir}/REINSURANCE.csv`` — two variables × N pairs per GoC.
+    - ``{run_dir}/MANDATORY_ACTUALS.csv`` — 16 variables × N pairs per GoC.
+    - ``{run_dir}/PROJECTION_PARAMETERS_ENTITY.csv`` — uploaded copy of
       the Projection Parameters file with rule-based VALUE edits applied
       based on ``year`` and ``semester``.
-    - ``{run_dir}/MP_GOC_SEG.xlsx`` — uploaded copy of the MP_GOC_SEG
+    - ``{run_dir}/MP_GOC_SEG.csv`` — uploaded copy of the MP_GOC_SEG
       file with ``P&C`` rewritten to ``HLTH_PC`` in columns A and C for
       rows whose GoC name (first 11 chars of column B) is in
       ``health_perimeter_gocs``.
-    - ``{run_dir}/ACTUARIAL_AOM_IMPACT.xlsx`` — historical file with new
+    - ``{run_dir}/ACTUARIAL_AOM_IMPACT.csv`` — historical file with new
       rows appended (one per ``(goc_id, step_id, value)`` combination
-      from the kept pairs and ``actuarial_aom_impact_pairs``); the full
-      sheet is sorted by columns A and B.
-    - ``{run_dir}/CURVE_ID_PARAM.xlsx`` — uploaded copy with column C
+      from the kept pairs and ``actuarial_aom_impact_pairs``); sorted
+      by columns A and B.
+    - ``{run_dir}/CURVE_ID_PARAM.csv`` — uploaded copy with column C
       filled per VARIABLE_NAME: ``CLOSING_CURVE_ID`` ->
       ``closing_curve_name``, ``OPENING_CURVE_ID`` ->
       ``opening_curve_name``, ``CREDITED_RATE_CURVE_ID`` -> column A.
-    - ``{run_dir}/OCI_OPTION_CF_CLOSING.xlsx`` — empty placeholder.
-    - ``{run_dir}/OCI_OPTION_CF_OPENING.xlsx`` — empty placeholder.
+    - ``{run_dir}/OCI_OPTION_CF_CLOSING.csv`` — empty placeholder.
+    - ``{run_dir}/OCI_OPTION_CF_OPENING.csv`` — empty placeholder.
 
     ``entity_id``, ``entity_name`` and ``semester`` are accepted for
     symmetry with the Astra UI form but are not used by the current
@@ -206,22 +206,22 @@ def run_astra_phase1(
     min_year = year - (ASTRA_COHORT_YEAR_SPAN - 1)
     pairs = [p for p in raw_pairs if min_year <= p["year"] <= year]
 
-    new_business_path = run_dir / "NEW_BUSINESS_PPOS.xlsx"
+    new_business_path = run_dir / "NEW_BUSINESS_PPOS.csv"
     create_new_business_ppos(pairs=pairs, output_path=str(new_business_path))
 
-    coverage_unit_path = run_dir / "COVERAGE_UNIT.xlsx"
+    coverage_unit_path = run_dir / "COVERAGE_UNIT.csv"
     create_coverage_unit(pairs=pairs, output_path=str(coverage_unit_path))
 
-    reinsurance_path = run_dir / "REINSURANCE.xlsx"
+    reinsurance_path = run_dir / "REINSURANCE.csv"
     create_reinsurance(pairs=pairs, output_path=str(reinsurance_path))
 
-    mandatory_actuals_path = run_dir / "MANDATORY_ACTUALS.xlsx"
+    mandatory_actuals_path = run_dir / "MANDATORY_ACTUALS.csv"
     create_mandatory_actuals(pairs=pairs, output_path=str(mandatory_actuals_path))
 
     projection_params_in = _find_file_by_suffix(
         input_paths, PROJECTION_PARAMETERS_SUFFIX
     )
-    projection_params_path = run_dir / "PROJECTION_PARAMETERS_ENTITY.xlsx"
+    projection_params_path = run_dir / "PROJECTION_PARAMETERS_ENTITY.csv"
     update_projection_parameters_entity(
         input_path=str(projection_params_in),
         output_path=str(projection_params_path),
@@ -230,7 +230,7 @@ def run_astra_phase1(
     )
 
     mp_goc_seg_in = _find_file_by_suffix(input_paths, MP_GOC_SEG_SUFFIX)
-    mp_goc_seg_path = run_dir / "MP_GOC_SEG.xlsx"
+    mp_goc_seg_path = run_dir / "MP_GOC_SEG.csv"
     update_mp_goc_seg(
         input_path=str(mp_goc_seg_in),
         output_path=str(mp_goc_seg_path),
@@ -238,7 +238,7 @@ def run_astra_phase1(
     )
 
     aom_impact_in = _find_file_by_suffix(input_paths, ACTUARIAL_AOM_IMPACT_SUFFIX)
-    aom_impact_path = run_dir / "ACTUARIAL_AOM_IMPACT.xlsx"
+    aom_impact_path = run_dir / "ACTUARIAL_AOM_IMPACT.csv"
     append_actuarial_aom_impact(
         input_path=str(aom_impact_in),
         output_path=str(aom_impact_path),
@@ -247,7 +247,7 @@ def run_astra_phase1(
     )
 
     curve_id_param_in = _find_file_by_suffix(input_paths, CURVE_ID_PARAM_SUFFIX)
-    curve_id_param_path = run_dir / "CURVE_ID_PARAM.xlsx"
+    curve_id_param_path = run_dir / "CURVE_ID_PARAM.csv"
     update_curve_id_param(
         input_path=str(curve_id_param_in),
         output_path=str(curve_id_param_path),
@@ -255,10 +255,10 @@ def run_astra_phase1(
         opening_curve_name=opening_curve_name,
     )
 
-    closing_path = run_dir / "OCI_OPTION_CF_CLOSING.xlsx"
-    opening_path = run_dir / "OCI_OPTION_CF_OPENING.xlsx"
-    create_empty_workbook(str(closing_path), sheet_name="OCI_OPTION_CF_CLOSING")
-    create_empty_workbook(str(opening_path), sheet_name="OCI_OPTION_CF_OPENING")
+    closing_path = run_dir / "OCI_OPTION_CF_CLOSING.csv"
+    opening_path = run_dir / "OCI_OPTION_CF_OPENING.csv"
+    create_empty_csv(str(closing_path))
+    create_empty_csv(str(opening_path))
 
     return [
         new_business_path,

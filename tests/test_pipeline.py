@@ -1,12 +1,46 @@
 """Tests for excel_pipeline.pipeline (deterministic, no API calls)."""
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import openpyxl
 import pytest
 
 from excel_pipeline.pipeline import run_astra_phase1, run_phase1
+
+
+def _read_csv(path: Path) -> list[tuple]:
+    """Read CSV rows; coerce numeric cells to int/float, '' to None."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        rows: list[tuple] = []
+        for raw in reader:
+            cells = []
+            for cell in raw:
+                if cell == "":
+                    cells.append(None)
+                    continue
+                try:
+                    cells.append(int(cell))
+                    continue
+                except ValueError:
+                    pass
+                try:
+                    cells.append(float(cell))
+                    continue
+                except ValueError:
+                    pass
+                cells.append(cell)
+            rows.append(tuple(cells))
+        return rows
+
+
+def _write_csv(path: Path, rows: list[tuple]) -> None:
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        for row in rows:
+            writer.writerow(["" if v is None else v for v in row])
 
 
 def _build_ceded_fixture(path: Path) -> None:
@@ -88,15 +122,15 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
 
     outputs = result["outputs"]
     assert outputs == [
-        tmp_path / "MP_LoB.xlsx",
-        tmp_path / "MP_ObservationYear.xlsx",
-        tmp_path / "Risk_Adjustment.xlsx",
-        tmp_path / "Payment_pattern.xlsx",
+        tmp_path / "MP_LoB.csv",
+        tmp_path / "MP_ObservationYear.csv",
+        tmp_path / "Risk_Adjustment.csv",
+        tmp_path / "Payment_pattern.csv",
     ]
     for p in outputs:
         assert p.exists()
 
-    mp_lob = list(openpyxl.load_workbook(outputs[0])["MP_LoB"].iter_rows(values_only=True))
+    mp_lob = _read_csv(outputs[0])
     assert mp_lob == [
         ("GoC_ID", "Entity_ID"),
         ("Motor", 6),
@@ -104,9 +138,7 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         ("Liability", 6),
     ]
 
-    mp_obs = list(
-        openpyxl.load_workbook(outputs[1])["MP_ObservationYear"].iter_rows(values_only=True)
-    )
+    mp_obs = _read_csv(outputs[1])
     assert mp_obs == [
         ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
         ("Motor@Opening", 2024, "Motor", 0, "Yes"),
@@ -118,9 +150,7 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
     ]
 
     # H2 2025: Closing = FY_2025, Opening = FY_2024
-    ra = list(
-        openpyxl.load_workbook(outputs[2])["Risk_Adjustment"].iter_rows(values_only=True)
-    )
+    ra = _read_csv(outputs[2])
     assert ra == [
         ("ObservationID", "Risk_Adjustment"),
         ("Motor@Opening", 110),
@@ -131,13 +161,12 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         ("Liability@Closing", 330),
     ]
 
-    pp = list(
-        openpyxl.load_workbook(outputs[3])["Payment_pattern"].iter_rows(values_only=True)
-    )
-    expected_headers = ("GoC", "Year") + tuple(str(i) for i in range(23))
-    assert pp[0] == expected_headers
+    pp = _read_csv(outputs[3])
+    # Header columns "0".."22" coerce to ints under _read_csv; the header
+    # check is on the textual prefix only.
+    assert pp[0][:2] == ("GoC", "Year")
+    assert pp[0][2:] == tuple(range(23))
     # For each GoC, reference year first then year-1.
-    # seed: Motor FY2025=2000, FY2024=1000; Property FY2025=6000, FY2024=5000; Liability FY2025=8000, FY2024=7000.
     assert pp[1] == ("Motor", 2025) + tuple(2000 + i for i in range(23))
     assert pp[2] == ("Motor", 2024) + tuple(1000 + i for i in range(23))
     assert pp[3] == ("Property", 2025) + tuple(6000 + i for i in range(23))
@@ -183,15 +212,11 @@ def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
     )
     outputs = result["outputs"]
 
-    mp_lob_rows = list(
-        openpyxl.load_workbook(outputs[0])["MP_LoB"].iter_rows(values_only=True)
-    )
+    mp_lob_rows = _read_csv(outputs[0])
     assert mp_lob_rows[1:] == [("Motor", 14), ("Property", 14), ("Liability", 14)]
 
     # H1 2025: Closing = HY_2025, Opening = HY_2024
-    ra_rows = list(
-        openpyxl.load_workbook(outputs[2])["Risk_Adjustment"].iter_rows(values_only=True)
-    )
+    ra_rows = _read_csv(outputs[2])
     assert ra_rows[1:] == [
         ("Motor@Opening", 100),
         ("Motor@Closing", 120),
@@ -220,11 +245,8 @@ def _build_ceded_with_pairs_fixture(
 
 
 def _build_projection_parameters_fixture(path: Path) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="PARAMETER")
-    ws.cell(row=1, column=2, value="VALUE")
-    rows = [
+    rows: list[tuple] = [
+        ("PARAMETER", "VALUE"),
         ("PROJECTED_PERIODS", 110),
         ("CF_TIMESTEP", "SEMESTRIAL"),
         ("REPORTING_MONTH", "12_DECEMBER"),
@@ -233,51 +255,25 @@ def _build_projection_parameters_fixture(path: Path) -> None:
         ("FX_CLOSING_DATE", "FY25"),
         ("FX_REPORTING_DATE", 20251231),
     ]
-    for i, (param, val) in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=param)
-        ws.cell(row=i, column=2, value=val)
-    wb.save(path)
+    _write_csv(path, rows)
 
 
 def _build_mp_goc_seg_fixture(path: Path, rows: list[tuple]) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="GOC_SEG_ID")
-    ws.cell(row=1, column=2, value="GOC_ID")
-    ws.cell(row=1, column=3, value="SEG_ID")
-    ws.cell(row=1, column=4, value="ALLOCATION_RATIO")
-    for i, (a, b, c, d) in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=a)
-        ws.cell(row=i, column=2, value=b)
-        ws.cell(row=i, column=3, value=c)
-        ws.cell(row=i, column=4, value=d)
-    wb.save(path)
+    out: list[tuple] = [("GOC_SEG_ID", "GOC_ID", "SEG_ID", "ALLOCATION_RATIO")]
+    out.extend(rows)
+    _write_csv(path, out)
 
 
 def _build_aom_impact_fixture(path: Path, rows: list[tuple]) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="STEP_ID")
-    ws.cell(row=1, column=3, value=1)
-    for i, (a, b, c) in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=a)
-        ws.cell(row=i, column=2, value=b)
-        ws.cell(row=i, column=3, value=c)
-    wb.save(path)
+    out: list[tuple] = [("GOC_ID", "STEP_ID", 1)]
+    out.extend(rows)
+    _write_csv(path, out)
 
 
 def _build_curve_id_param_fixture(path: Path, rows: list[tuple]) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.cell(row=1, column=1, value="GOC_ID")
-    ws.cell(row=1, column=2, value="VARIABLE_NAME")
-    ws.cell(row=1, column=3, value=1)
-    for i, (a, b, c) in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=a)
-        ws.cell(row=i, column=2, value=b)
-        ws.cell(row=i, column=3, value=c)
-    wb.save(path)
+    out: list[tuple] = [("GOC_ID", "VARIABLE_NAME", 1)]
+    out.extend(rows)
+    _write_csv(path, out)
 
 
 def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
@@ -292,9 +288,9 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
             ("IT06ABCDE", 2024),
         ],
     )
-    pp_params = inputs_dir / "1.4_2024.12.31_PROJECTION_PARAMETERS_ENTITY.xlsx"
+    pp_params = inputs_dir / "1.4_2024.12.31_PROJECTION_PARAMETERS_ENTITY.csv"
     _build_projection_parameters_fixture(pp_params)
-    mp_goc_seg = inputs_dir / "1.5_2024.12.31_MP_GOC_SEG.xlsx"
+    mp_goc_seg = inputs_dir / "1.5_2024.12.31_MP_GOC_SEG.csv"
     _build_mp_goc_seg_fixture(
         mp_goc_seg,
         [
@@ -302,12 +298,12 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
             ("IT05RRIEEBB2024_02_P&C", "IT05RRIEEBB2024", "02_P&C", 1),
         ],
     )
-    aom_impact = inputs_dir / "1.6_2024.12.31_ACTUARIAL_AOM_IMPACT.xlsx"
+    aom_impact = inputs_dir / "1.6_2024.12.31_ACTUARIAL_AOM_IMPACT.csv"
     _build_aom_impact_fixture(
         aom_impact,
         [("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0)],  # historical entry
     )
-    curve_id_param = inputs_dir / "1.7_2024.12.31_CURVE_ID_PARAM.xlsx"
+    curve_id_param = inputs_dir / "1.7_2024.12.31_CURVE_ID_PARAM.csv"
     _build_curve_id_param_fixture(
         curve_id_param,
         [
@@ -331,24 +327,22 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     )
 
     assert outputs == [
-        tmp_path / "NEW_BUSINESS_PPOS.xlsx",
-        tmp_path / "COVERAGE_UNIT.xlsx",
-        tmp_path / "REINSURANCE.xlsx",
-        tmp_path / "MANDATORY_ACTUALS.xlsx",
-        tmp_path / "PROJECTION_PARAMETERS_ENTITY.xlsx",
-        tmp_path / "MP_GOC_SEG.xlsx",
-        tmp_path / "ACTUARIAL_AOM_IMPACT.xlsx",
-        tmp_path / "CURVE_ID_PARAM.xlsx",
-        tmp_path / "OCI_OPTION_CF_CLOSING.xlsx",
-        tmp_path / "OCI_OPTION_CF_OPENING.xlsx",
+        tmp_path / "NEW_BUSINESS_PPOS.csv",
+        tmp_path / "COVERAGE_UNIT.csv",
+        tmp_path / "REINSURANCE.csv",
+        tmp_path / "MANDATORY_ACTUALS.csv",
+        tmp_path / "PROJECTION_PARAMETERS_ENTITY.csv",
+        tmp_path / "MP_GOC_SEG.csv",
+        tmp_path / "ACTUARIAL_AOM_IMPACT.csv",
+        tmp_path / "CURVE_ID_PARAM.csv",
+        tmp_path / "OCI_OPTION_CF_CLOSING.csv",
+        tmp_path / "OCI_OPTION_CF_OPENING.csv",
     ]
     for p in outputs:
         assert p.exists()
 
     # NEW_BUSINESS_PPOS: one row per pair (3 pairs in fixture)
-    nb_rows = list(
-        openpyxl.load_workbook(outputs[0])["NEW_BUSINESS_PPOS"].iter_rows(values_only=True)
-    )
+    nb_rows = _read_csv(outputs[0])
     assert nb_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
@@ -356,18 +350,12 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0),
     ]
 
-    # COVERAGE_UNIT: 1 header + 3 pair rows
-    cu_rows = list(
-        openpyxl.load_workbook(outputs[1])["COVERAGE_UNIT"].iter_rows(values_only=True)
-    )
+    cu_rows = _read_csv(outputs[1])
     assert len(cu_rows) == 1 + 3
     assert cu_rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
     assert cu_rows[3] == ("IT06ABCDE2024", 1) + (0,) * 100
 
-    # REINSURANCE: per GoC, all IFE rows then all CLOSING rows
-    rein_rows = list(
-        openpyxl.load_workbook(outputs[2])["REINSURANCE"].iter_rows(values_only=True)
-    )
+    rein_rows = _read_csv(outputs[2])
     assert rein_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1, "T"),
         ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
@@ -378,57 +366,41 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         ("IT06ABCDE2024", "LOSSRECO_CLOSING", 0, 2024),
     ]
 
-    # MANDATORY_ACTUALS: 1 header + (3 pairs * 16 variables) = 49 rows
-    ma_rows = list(
-        openpyxl.load_workbook(outputs[3])["MANDATORY_ACTUALS"].iter_rows(values_only=True)
-    )
+    ma_rows = _read_csv(outputs[3])
     assert len(ma_rows) == 1 + 3 * 16
     assert ma_rows[1] == ("IT05PABPPLE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
-    # Second pair starts at row 17
     assert ma_rows[17] == ("IT05PABPPLE2023", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
     assert ma_rows[33] == ("IT06ABCDE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
 
-    # PROJECTION_PARAMETERS_ENTITY: edits applied for H2 / 2024
-    pp_ws = openpyxl.load_workbook(outputs[4]).active
-    by_param = {
-        pp_ws.cell(row=r, column=1).value: pp_ws.cell(row=r, column=2).value
-        for r in range(2, pp_ws.max_row + 1)
-    }
+    pp_rows = _read_csv(outputs[4])
+    by_param = {row[0]: row[1] for row in pp_rows[1:]}
     assert by_param["CF_TIMESTEP"] == "YEARLY"
     assert by_param["REPORTING_MONTH"] == "12_DECEMBER"
     assert by_param["FX_OPENING_DATE"] == "1M24"
     assert by_param["FX_AVERAGE_DATE"] == "HY24"
     assert by_param["FX_CLOSING_DATE"] == "FY24"
-    assert by_param["FX_REPORTING_DATE"] == "20241231"
-    # Untouched
+    assert by_param["FX_REPORTING_DATE"] == 20241231
     assert by_param["PROJECTED_PERIODS"] == 110
 
-    # MP_GOC_SEG: only the IT05RRIEEBB row gets P&C -> HLTH_PC
-    seg_rows = list(openpyxl.load_workbook(outputs[5]).active.iter_rows(values_only=True))
+    seg_rows = _read_csv(outputs[5])
     assert seg_rows[1] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
     assert seg_rows[2] == (
         "IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1,
     )
 
-    # ACTUARIAL_AOM_IMPACT: existing row + new (pair * step) rows, sorted A+B.
-    # Ceded fixture has 3 pairs in window: IT05PABPPLE2024, IT05PABPPLE2023,
-    # IT06ABCDE2024. Two step pairs -> 6 new rows + 1 historical = 7 data rows.
-    aom_rows = list(openpyxl.load_workbook(outputs[6]).active.iter_rows(values_only=True))
+    aom_rows = _read_csv(outputs[6])
     assert aom_rows[0] == ("GOC_ID", "STEP_ID", 1)
     assert aom_rows[1:] == [
         ("IT05PABPPLE2023", "DA_LIC_CLO", 0),
         ("IT05PABPPLE2023", "DA_LIC_OP", 0),
         ("IT05PABPPLE2024", "DA_LIC_CLO", 0),
         ("IT05PABPPLE2024", "DA_LIC_OP", 0),
-        ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),  # historical
+        ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
         ("IT06ABCDE2024", "DA_LIC_CLO", 0),
         ("IT06ABCDE2024", "DA_LIC_OP", 0),
     ]
 
-    # CURVE_ID_PARAM: each variable filled per spec
-    curve_rows = list(
-        openpyxl.load_workbook(outputs[7]).active.iter_rows(values_only=True)
-    )
+    curve_rows = _read_csv(outputs[7])
     assert curve_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
@@ -452,13 +424,13 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
             ("IT06ABCDE", 2020),    # kept (within window)
         ],
     )
-    pp_params = inputs_dir / "1.4_PROJECTION_PARAMETERS_ENTITY.xlsx"
+    pp_params = inputs_dir / "1.4_PROJECTION_PARAMETERS_ENTITY.csv"
     _build_projection_parameters_fixture(pp_params)
-    mp_goc_seg = inputs_dir / "1.5_MP_GOC_SEG.xlsx"
+    mp_goc_seg = inputs_dir / "1.5_MP_GOC_SEG.csv"
     _build_mp_goc_seg_fixture(mp_goc_seg, [])
-    aom_impact = inputs_dir / "1.6_ACTUARIAL_AOM_IMPACT.xlsx"
+    aom_impact = inputs_dir / "1.6_ACTUARIAL_AOM_IMPACT.csv"
     _build_aom_impact_fixture(aom_impact, [])
-    curve_id_param = inputs_dir / "1.7_CURVE_ID_PARAM.xlsx"
+    curve_id_param = inputs_dir / "1.7_CURVE_ID_PARAM.csv"
     _build_curve_id_param_fixture(curve_id_param, [])
 
     outputs = run_astra_phase1(
@@ -475,9 +447,7 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     )
 
     # Only 3 of the 5 pairs survive the filter
-    nb_rows = list(
-        openpyxl.load_workbook(outputs[0])["NEW_BUSINESS_PPOS"].iter_rows(values_only=True)
-    )
+    nb_rows = _read_csv(outputs[0])
     assert nb_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
