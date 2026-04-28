@@ -158,7 +158,10 @@ aom_impact_df = st.data_editor(
         "Value": st.column_config.NumberColumn(
             "Value",
             required=True,
-            help="Goes into column C of ACTUARIAL_AOM_IMPACT.csv.",
+            format="%.10f",
+            step=1e-10,
+            help="Goes into column C of ACTUARIAL_AOM_IMPACT.csv. "
+            "Supports up to 10 decimal places.",
         ),
     },
     key="astra_aom_impact_editor",
