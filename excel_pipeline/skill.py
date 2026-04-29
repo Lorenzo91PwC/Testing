@@ -15,6 +15,7 @@ Adding a new transformation (checklist):
 """
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,89 @@ def preview_rows(path: str, sheet: str, n: int = 5) -> dict[str, Any]:
 
 
 # ===========================================================================
+# Astra — MP_GOC transformation
+# ===========================================================================
+_BUSINESS_TYPE_VALUES = {
+    "Direct": "2_RE_ASSUMED",
+    "Ceduto": "3_RE_CEDED_NON_RETRO",
+}
+
+
+def _parse_valuation_date(valuation_date: str) -> date:
+    return datetime.strptime(valuation_date, "%Y-%m-%d").date()
+
+
+def _semester_mmdd(val: date) -> str:
+    return "0630" if val.month <= 6 else "1231"
+
+
+def _inception_curve_id(cohort_year: int, mmdd: str) -> str:
+    if cohort_year <= 2015:
+        return f"{cohort_year}{mmdd}_ITA_LP100"
+    if cohort_year <= 2021:
+        return f"{cohort_year}{mmdd}_ITA_LP100_AVG"
+    if cohort_year == 2022:
+        return f"2022{mmdd}_ITA_LP100_FY22_AVG"
+    yy = f"{cohort_year % 100:02d}"
+    return f"{cohort_year}{mmdd}_EUR_LP100_FY{yy}_AVG"
+
+
+def astra_transform_mp_goc(
+    input_path: str,
+    output_path: str,
+    valuation_date: str,
+    business_type: str,
+) -> dict[str, Any]:
+    """Apply the Astra MP_GOC column rules and save the result.
+
+    Rules per row (data starts at row 2, single sheet, year is column C):
+      - E (INCEPTION_CURVE_ID): year-bucketed string with MMDD = 0630
+        if first semester else 1231.
+      - F (TIMING_INCEPTION_CURVE): only when C year == 2025, set to
+        "7_JULY" (first semester) or "13_YEAR_END" (second). Otherwise
+        leave untouched.
+      - L (GOC_DURATION): max(0, valuation_year - cohort_year) * 12.
+      - P (GOC_TYPE_REINSURANCE): "2_RE_ASSUMED" if business_type=="Direct",
+        "3_RE_CEDED_NON_RETRO" if "Ceduto".
+
+    Idempotent: rerunning with the same inputs produces the same output.
+    """
+    if business_type not in _BUSINESS_TYPE_VALUES:
+        raise ValueError(
+            f"business_type must be one of {sorted(_BUSINESS_TYPE_VALUES)}, "
+            f"got {business_type!r}"
+        )
+    val = _parse_valuation_date(valuation_date)
+    mmdd = _semester_mmdd(val)
+    f_value_for_2025 = "7_JULY" if val.month <= 6 else "13_YEAR_END"
+    p_value = _BUSINESS_TYPE_VALUES[business_type]
+
+    wb = load_workbook(input_path)
+    ws = wb[wb.sheetnames[0]]
+    rows_changed = 0
+    for r in range(2, ws.max_row + 1):
+        cohort_raw = ws.cell(row=r, column=3).value
+        if cohort_raw is None or cohort_raw == "":
+            continue
+        cohort_year = int(cohort_raw)
+
+        ws.cell(row=r, column=5).value = _inception_curve_id(cohort_year, mmdd)
+        if cohort_year == 2025:
+            ws.cell(row=r, column=6).value = f_value_for_2025
+        ws.cell(row=r, column=12).value = max(0, val.year - cohort_year) * 12
+        ws.cell(row=r, column=16).value = p_value
+        rows_changed += 1
+
+    save_workbook(wb, output_path)
+    return {
+        "rows_changed": rows_changed,
+        "output_path": output_path,
+        "valuation_date": valuation_date,
+        "business_type": business_type,
+    }
+
+
+# ===========================================================================
 # TODO — Domain-specific transformations
 # ===========================================================================
 # Add the customer's actual Phase 1 / Phase 2 / ad-hoc operations here.
@@ -146,7 +230,45 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["path", "sheet"],
         },
     },
-    # Add a schema entry for each domain-specific function above.
+    {
+        "name": "astra_transform_mp_goc",
+        "description": (
+            "Apply the Astra MP_GOC column rules to a workbook and save the "
+            "result. Operates on the only sheet, header in row 1, data from "
+            "row 2. Modifies columns E, F, L, P per the MP_GOC spec, using "
+            "the user-provided valuation_date (YYYY-MM-DD) and business_type "
+            "('Direct' or 'Ceduto'). Idempotent — rerunning with the same "
+            "inputs is safe and produces the same output."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "input_path": {
+                    "type": "string",
+                    "description": "Absolute path to the source MP_GOC .xlsx.",
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Absolute path where the transformed .xlsx is saved.",
+                },
+                "valuation_date": {
+                    "type": "string",
+                    "description": "Valuation date in ISO format YYYY-MM-DD.",
+                },
+                "business_type": {
+                    "type": "string",
+                    "enum": ["Direct", "Ceduto"],
+                    "description": "Direct → 2_RE_ASSUMED; Ceduto → 3_RE_CEDED_NON_RETRO.",
+                },
+            },
+            "required": [
+                "input_path",
+                "output_path",
+                "valuation_date",
+                "business_type",
+            ],
+        },
+    },
 ]
 
 
@@ -156,7 +278,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 _DISPATCH: dict[str, Any] = {
     "inspect_workbook": inspect_workbook,
     "preview_rows": preview_rows,
-    # Add an entry for each domain-specific function above.
+    "astra_transform_mp_goc": astra_transform_mp_goc,
 }
 
 
