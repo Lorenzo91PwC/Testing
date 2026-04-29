@@ -115,12 +115,14 @@ col_close_curve, col_open_curve = st.columns(2)
 with col_close_curve:
     closing_curve_name = st.text_input(
         "Closing curve name",
+        value="20251231_EUR_LP100_FY25",
         help="Goes into column C of CURVE_ID_PARAM.csv for rows where "
         "VARIABLE_NAME == 'CLOSING_CURVE_ID'.",
     )
 with col_open_curve:
     opening_curve_name = st.text_input(
         "Opening curve name",
+        value="20241231_EUR_LP100_FY24",
         help="Goes into column C of CURVE_ID_PARAM.csv for rows where "
         "VARIABLE_NAME == 'OPENING_CURVE_ID'.",
     )
