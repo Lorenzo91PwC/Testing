@@ -24,6 +24,7 @@ from excel_pipeline.skill import (
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
     update_curve_id_param,
+    update_mp_goc,
     update_mp_goc_seg,
     update_projection_parameters_entity,
 )
@@ -1047,3 +1048,130 @@ def test_update_curve_id_param_leaves_other_variables_untouched(tmp_path: Path) 
         ("IT05PABPPLE2024", "SOMETHING_ELSE", "preserved"),
         ("IT05PABPPLE2024", None, "also preserved"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# update_mp_goc
+# ---------------------------------------------------------------------------
+_MP_GOC_HEADERS = (
+    "GOC_ID", "MEASUREMENT_MODEL", "ANNUAL_COHORT", "AOM_ID",
+    "INCEPTION_CURVE_ID", "TIMING_INCEPTION_CURVE",
+    "CSM_RELEASE_RATIO_CURVE_ID", "SHARE_TECH_EXP_ENTITY_SHARE",
+    "OCI_OPTION", "OCI_OPTION_LRC", "OCI_OPTION_LIC", "GOC_DURATION",
+    "GOC_TYPE_IF_NB", "GOC_CURRENCY", "REPORTING_CURRENCY",
+    "GOC_TYPE_REINSURANCE", "AGGREG_1_ID", "AGGREG_2_ID", "AGGREG_3_ID",
+    "AGGREG_4_ID", "AGGREG_5_ID",
+)
+_MP_GOC_COHORT_YEARS = (2014, 2018, 2021, 2022, 2024, 2025)
+
+
+def _build_mp_goc_fixture(path: Path, original_f: str = "ORIGINAL_F") -> None:
+    rows: list[tuple] = [_MP_GOC_HEADERS]
+    for y in _MP_GOC_COHORT_YEARS:
+        row = [f"IT{y}", "PAA", y, 20] + [None] * (len(_MP_GOC_HEADERS) - 4)
+        row[5] = original_f
+        rows.append(tuple(row))
+    _write_csv(path, rows)
+
+
+def _read_mp_goc(path: Path) -> dict[int, dict]:
+    rows = _read_csv(path)
+    out: dict[int, dict] = {}
+    for r in rows[1:]:
+        out[r[2]] = {"E": r[4], "F": r[5], "L": r[11], "P": r[15]}
+    return out
+
+
+def test_update_mp_goc_h2_diretto(tmp_path: Path) -> None:
+    fixture = tmp_path / "MP_GOC.csv"
+    output = tmp_path / "out.csv"
+    _build_mp_goc_fixture(fixture)
+
+    result = update_mp_goc(
+        input_path=str(fixture),
+        output_path=str(output),
+        year=2025,
+        semester=2,
+        business_type="Diretto",
+    )
+    assert result["rows_changed"] == len(_MP_GOC_COHORT_YEARS)
+
+    rows = _read_mp_goc(output)
+    assert rows[2014]["E"] == "20141231_ITA_LP100"
+    assert rows[2018]["E"] == "20181231_ITA_LP100_AVG"
+    assert rows[2021]["E"] == "20211231_ITA_LP100_AVG"
+    assert rows[2022]["E"] == "20221231_ITA_LP100_FY22_AVG"
+    assert rows[2024]["E"] == "20241231_EUR_LP100_FY24_AVG"
+    assert rows[2025]["E"] == "20251231_EUR_LP100_FY25_AVG"
+
+    assert rows[2025]["F"] == "13_YEAR_END"
+    for y in (2014, 2018, 2021, 2022, 2024):
+        assert rows[y]["F"] == "ORIGINAL_F"
+
+    assert rows[2014]["L"] == (2025 - 2014) * 12
+    assert rows[2024]["L"] == 12
+    assert rows[2025]["L"] == 0
+
+    for y in _MP_GOC_COHORT_YEARS:
+        assert rows[y]["P"] == "2_RE_ASSUMED"
+
+
+def test_update_mp_goc_h1_ceduto(tmp_path: Path) -> None:
+    fixture = tmp_path / "MP_GOC.csv"
+    output = tmp_path / "out.csv"
+    _build_mp_goc_fixture(fixture)
+
+    update_mp_goc(
+        input_path=str(fixture),
+        output_path=str(output),
+        year=2025,
+        semester=1,
+        business_type="Ceduto",
+    )
+    rows = _read_mp_goc(output)
+    assert rows[2014]["E"] == "20140630_ITA_LP100"
+    assert rows[2022]["E"] == "20220630_ITA_LP100_FY22_AVG"
+    assert rows[2025]["E"] == "20250630_EUR_LP100_FY25_AVG"
+    assert rows[2025]["F"] == "7_JULY"
+    assert rows[2024]["F"] == "ORIGINAL_F"
+    for y in _MP_GOC_COHORT_YEARS:
+        assert rows[y]["P"] == "3_RE_CEDED_NON_RETRO"
+
+
+def test_update_mp_goc_idempotent(tmp_path: Path) -> None:
+    fixture = tmp_path / "MP_GOC.csv"
+    out1 = tmp_path / "out1.csv"
+    out2 = tmp_path / "out2.csv"
+    _build_mp_goc_fixture(fixture)
+
+    update_mp_goc(
+        input_path=str(fixture), output_path=str(out1),
+        year=2025, semester=2, business_type="Diretto",
+    )
+    update_mp_goc(
+        input_path=str(out1), output_path=str(out2),
+        year=2025, semester=2, business_type="Diretto",
+    )
+    assert _read_csv(out1) == _read_csv(out2)
+
+
+def test_update_mp_goc_invalid_business_type(tmp_path: Path) -> None:
+    fixture = tmp_path / "MP_GOC.csv"
+    output = tmp_path / "out.csv"
+    _build_mp_goc_fixture(fixture)
+    with pytest.raises(ValueError):
+        update_mp_goc(
+            input_path=str(fixture), output_path=str(output),
+            year=2025, semester=2, business_type="Direct",
+        )
+
+
+def test_update_mp_goc_invalid_semester(tmp_path: Path) -> None:
+    fixture = tmp_path / "MP_GOC.csv"
+    output = tmp_path / "out.csv"
+    _build_mp_goc_fixture(fixture)
+    with pytest.raises(ValueError):
+        update_mp_goc(
+            input_path=str(fixture), output_path=str(output),
+            year=2025, semester=3, business_type="Diretto",
+        )

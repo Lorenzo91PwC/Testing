@@ -705,6 +705,110 @@ def create_empty_csv(output_path: str) -> dict[str, Any]:
     return {"output_path": output_path, "rows": 0, "columns": []}
 
 
+MP_GOC_BUSINESS_TYPE_VALUES = {
+    "Diretto": "2_RE_ASSUMED",
+    "Ceduto": "3_RE_CEDED_NON_RETRO",
+}
+
+
+def _mp_goc_inception_curve_id(cohort_year: int, mmdd: str) -> str:
+    if cohort_year <= 2015:
+        return f"{cohort_year}{mmdd}_ITA_LP100"
+    if cohort_year <= 2021:
+        return f"{cohort_year}{mmdd}_ITA_LP100_AVG"
+    if cohort_year == 2022:
+        return f"2022{mmdd}_ITA_LP100_FY22_AVG"
+    yy = f"{cohort_year % 100:02d}"
+    return f"{cohort_year}{mmdd}_EUR_LP100_FY{yy}_AVG"
+
+
+def update_mp_goc(
+    input_path: str,
+    output_path: str,
+    year: int,
+    semester: int,
+    business_type: str,
+) -> dict[str, Any]:
+    """Apply the MP_GOC column rules and save to CSV.
+
+    The input has 21 columns (header in row 1, data from row 2). The cohort
+    year is column C (index 2). The function rewrites four columns per
+    data row:
+
+    - **E (INCEPTION_CURVE_ID, idx 4)** — year-bucketed string, with
+      MMDD = ``0630`` for ``semester == 1`` and ``1231`` for ``semester == 2``:
+        - cohort <= 2015: ``{cohort}{mmdd}_ITA_LP100``
+        - 2016 <= cohort <= 2021: ``{cohort}{mmdd}_ITA_LP100_AVG``
+        - cohort == 2022: ``2022{mmdd}_ITA_LP100_FY22_AVG``
+        - cohort >= 2023: ``{cohort}{mmdd}_EUR_LP100_FY{yy}_AVG``
+          where ``yy`` is the cohort year mod 100, zero-padded to 2.
+    - **F (TIMING_INCEPTION_CURVE, idx 5)** — only when cohort_year == 2025:
+      ``"7_JULY"`` for H1, ``"13_YEAR_END"`` for H2. Other rows keep the
+      existing F value.
+    - **L (GOC_DURATION, idx 11)** — ``max(0, year - cohort_year) * 12``.
+    - **P (GOC_TYPE_REINSURANCE, idx 15)** — ``"2_RE_ASSUMED"`` if
+      ``business_type == "Diretto"``, ``"3_RE_CEDED_NON_RETRO"`` if
+      ``"Ceduto"``.
+
+    ``semester`` follows the pipeline convention (1 = H1 / June, 2 = H2 /
+    December). Idempotent: rerunning with the same inputs produces the
+    same output.
+    """
+    if business_type not in MP_GOC_BUSINESS_TYPE_VALUES:
+        raise ValueError(
+            "business_type must be one of "
+            f"{sorted(MP_GOC_BUSINESS_TYPE_VALUES)}, got {business_type!r}"
+        )
+    if semester == 1:
+        mmdd = "0630"
+        f_value_for_2025 = "7_JULY"
+    elif semester == 2:
+        mmdd = "1231"
+        f_value_for_2025 = "13_YEAR_END"
+    else:
+        raise ValueError(f"semester must be 1 or 2, got {semester}")
+    p_value = MP_GOC_BUSINESS_TYPE_VALUES[business_type]
+
+    table = _read_csv_table(input_path)
+    if not table:
+        _write_csv_rows(output_path, [])
+        return {"output_path": output_path, "rows_changed": 0}
+
+    out_rows: list[list[Any]] = [list(table[0])]
+    rows_changed = 0
+    for raw in table[1:]:
+        row = list(raw)
+        while len(row) < 16:
+            row.append(None)
+
+        cohort_raw = row[2]
+        if cohort_raw is None or cohort_raw == "":
+            out_rows.append(row)
+            continue
+        try:
+            cohort_year = int(cohort_raw)
+        except (TypeError, ValueError):
+            out_rows.append(row)
+            continue
+
+        row[4] = _mp_goc_inception_curve_id(cohort_year, mmdd)
+        if cohort_year == 2025:
+            row[5] = f_value_for_2025
+        row[11] = max(0, year - cohort_year) * 12
+        row[15] = p_value
+        rows_changed += 1
+        out_rows.append(row)
+
+    _write_csv_rows(output_path, out_rows)
+    return {
+        "output_path": output_path,
+        "rows_changed": rows_changed,
+        "year": year,
+        "semester": semester,
+        "business_type": business_type,
+    }
+
+
 ASTRA_COHORT_YEAR_SPAN = 16  # analysis year + 15 prior cohorts; shared by all per-GoC cohort outputs
 COVERAGE_UNIT_PROJECTION_COLUMN_COUNT = 100
 

@@ -31,6 +31,7 @@ from .skill import (
     lookup_payment_pattern_values,
     lookup_risk_adjustment_values,
     update_curve_id_param,
+    update_mp_goc,
     update_mp_goc_seg,
     update_projection_parameters_entity,
 )
@@ -39,6 +40,7 @@ CEDED_SUFFIX = "AAI_P&C_Ceded"
 PAYMENT_PATTERNS_SUFFIX = "Payment_Patterns_&_Risk_Adjustments"
 PROJECTION_PARAMETERS_SUFFIX = "PROJECTION_PARAMETERS_ENTITY"
 MP_GOC_SEG_SUFFIX = "MP_GOC_SEG"
+MP_GOC_SUFFIX = "MP_GOC"
 ACTUARIAL_AOM_IMPACT_SUFFIX = "ACTUARIAL_AOM_IMPACT"
 CURVE_ID_PARAM_SUFFIX = "CURVE_ID_PARAM"
 
@@ -156,6 +158,7 @@ def run_astra_phase1(
     entity_name: str,
     year: int,
     semester: int,
+    business_type: str,
     health_perimeter_gocs: list[str],
     actuarial_aom_impact_pairs: list[tuple[str, Any]],
     closing_curve_name: str,
@@ -182,6 +185,9 @@ def run_astra_phase1(
       file with ``P&C`` rewritten to ``HLTH_PC`` in columns A and C for
       rows whose GoC name (first 11 chars of column B) is in
       ``health_perimeter_gocs``.
+    - ``{run_dir}/MP_GOC.csv`` — uploaded copy of the MP_GOC file with
+      columns E, F, L, P rewritten per ``year``, ``semester`` and
+      ``business_type``. ``business_type`` is ``"Diretto"`` or ``"Ceduto"``.
     - ``{run_dir}/ACTUARIAL_AOM_IMPACT.csv`` — historical file with new
       rows appended (one per ``(goc_id, step_id, value)`` combination
       from the kept pairs and ``actuarial_aom_impact_pairs``); sorted
@@ -193,11 +199,10 @@ def run_astra_phase1(
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.csv`` — empty placeholder.
     - ``{run_dir}/OCI_OPTION_CF_OPENING.csv`` — empty placeholder.
 
-    ``entity_id``, ``entity_name`` and ``semester`` are accepted for
-    symmetry with the Astra UI form but are not used by the current
-    transformations.
+    ``entity_id`` and ``entity_name`` are accepted for symmetry with the
+    Astra UI form but are not used by the current transformations.
     """
-    del entity_id, entity_name  # reserved for future skills (semester is used)
+    del entity_id, entity_name  # reserved for future skills
 
     ceded_path = _find_file_by_suffix(input_paths, CEDED_SUFFIX)
     raw_pairs = extract_unique_goc_cohort_pairs(str(ceded_path))["pairs"]
@@ -237,6 +242,16 @@ def run_astra_phase1(
         health_perimeter_gocs=health_perimeter_gocs,
     )
 
+    mp_goc_in = _find_file_by_suffix(input_paths, MP_GOC_SUFFIX)
+    mp_goc_path = run_dir / "MP_GOC.csv"
+    update_mp_goc(
+        input_path=str(mp_goc_in),
+        output_path=str(mp_goc_path),
+        year=year,
+        semester=semester,
+        business_type=business_type,
+    )
+
     aom_impact_in = _find_file_by_suffix(input_paths, ACTUARIAL_AOM_IMPACT_SUFFIX)
     aom_impact_path = run_dir / "ACTUARIAL_AOM_IMPACT.csv"
     append_actuarial_aom_impact(
@@ -267,6 +282,7 @@ def run_astra_phase1(
         mandatory_actuals_path,
         projection_params_path,
         mp_goc_seg_path,
+        mp_goc_path,
         aom_impact_path,
         curve_id_param_path,
         closing_path,

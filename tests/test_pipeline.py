@@ -270,6 +270,25 @@ def _build_aom_impact_fixture(path: Path, rows: list[tuple]) -> None:
     _write_csv(path, out)
 
 
+_MP_GOC_HEADERS_PIPE = (
+    "GOC_ID", "MEASUREMENT_MODEL", "ANNUAL_COHORT", "AOM_ID",
+    "INCEPTION_CURVE_ID", "TIMING_INCEPTION_CURVE",
+    "CSM_RELEASE_RATIO_CURVE_ID", "SHARE_TECH_EXP_ENTITY_SHARE",
+    "OCI_OPTION", "OCI_OPTION_LRC", "OCI_OPTION_LIC", "GOC_DURATION",
+    "GOC_TYPE_IF_NB", "GOC_CURRENCY", "REPORTING_CURRENCY",
+    "GOC_TYPE_REINSURANCE", "AGGREG_1_ID", "AGGREG_2_ID", "AGGREG_3_ID",
+    "AGGREG_4_ID", "AGGREG_5_ID",
+)
+
+
+def _build_mp_goc_fixture(path: Path, cohort_years: list[int]) -> None:
+    rows: list[tuple] = [_MP_GOC_HEADERS_PIPE]
+    for y in cohort_years:
+        row = [f"IT{y}", "PAA", y, 20] + [None] * (len(_MP_GOC_HEADERS_PIPE) - 4)
+        rows.append(tuple(row))
+    _write_csv(path, rows)
+
+
 def _build_curve_id_param_fixture(path: Path, rows: list[tuple]) -> None:
     out: list[tuple] = [("GOC_ID", "VARIABLE_NAME", 1)]
     out.extend(rows)
@@ -312,14 +331,17 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
             ("IT05PABPPLE2024", "CREDITED_RATE_CURVE_ID", None),
         ],
     )
+    mp_goc = inputs_dir / "1.8_2024.12.31_MP_GOC.csv"
+    _build_mp_goc_fixture(mp_goc, [2014, 2024])
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params, mp_goc_seg, aom_impact, curve_id_param],
+        input_paths=[ceded, pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",
         year=2024,
         semester=2,
+        business_type="Diretto",
         health_perimeter_gocs=["IT05RRIEEBB"],
         actuarial_aom_impact_pairs=[("DA_LIC_OP", 0), ("DA_LIC_CLO", 0)],
         closing_curve_name="pippo",
@@ -333,6 +355,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         tmp_path / "MANDATORY_ACTUALS.csv",
         tmp_path / "PROJECTION_PARAMETERS_ENTITY.csv",
         tmp_path / "MP_GOC_SEG.csv",
+        tmp_path / "MP_GOC.csv",
         tmp_path / "ACTUARIAL_AOM_IMPACT.csv",
         tmp_path / "CURVE_ID_PARAM.csv",
         tmp_path / "OCI_OPTION_CF_CLOSING.csv",
@@ -388,7 +411,17 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         "IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1,
     )
 
-    aom_rows = _read_csv(outputs[6])
+    mp_goc_rows = _read_csv(outputs[6])
+    by_cohort = {row[2]: row for row in mp_goc_rows[1:]}
+    # E (idx 4), F (idx 5), L (idx 11), P (idx 15)
+    assert by_cohort[2014][4] == "20141231_ITA_LP100"
+    assert by_cohort[2024][4] == "20241231_EUR_LP100_FY24_AVG"
+    assert by_cohort[2014][11] == (2024 - 2014) * 12
+    assert by_cohort[2024][11] == 0
+    for cohort in (2014, 2024):
+        assert by_cohort[cohort][15] == "2_RE_ASSUMED"
+
+    aom_rows = _read_csv(outputs[7])
     assert aom_rows[0] == ("GOC_ID", "STEP_ID", 1)
     assert aom_rows[1:] == [
         ("IT05PABPPLE2023", "DA_LIC_CLO", 0),
@@ -400,7 +433,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         ("IT06ABCDE2024", "DA_LIC_OP", 0),
     ]
 
-    curve_rows = _read_csv(outputs[7])
+    curve_rows = _read_csv(outputs[8])
     assert curve_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
@@ -432,14 +465,17 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     _build_aom_impact_fixture(aom_impact, [])
     curve_id_param = inputs_dir / "1.7_CURVE_ID_PARAM.csv"
     _build_curve_id_param_fixture(curve_id_param, [])
+    mp_goc = inputs_dir / "1.8_MP_GOC.csv"
+    _build_mp_goc_fixture(mp_goc, [])
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params, mp_goc_seg, aom_impact, curve_id_param],
+        input_paths=[ceded, pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
         entity_id=6,
         entity_name="AAI",
         year=2024,
         semester=2,
+        business_type="Diretto",
         health_perimeter_gocs=[],
         actuarial_aom_impact_pairs=[],
         closing_curve_name="",
@@ -468,6 +504,7 @@ def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:
             entity_name="AAI",
             year=2024,
             semester=2,
+            business_type="Diretto",
             health_perimeter_gocs=[],
             actuarial_aom_impact_pairs=[],
             closing_curve_name="",

@@ -69,7 +69,9 @@ st.warning(
     "sheet) and the specific rates row to extract are still to be defined; "
     "the output is not produced yet.\n\n"
     "`MP_GOC_SEG.csv` is wired and rewrites `P&C` to `HLTH_PC` in "
-    "columns A and C for the GoCs in the Health perimeter list below.",
+    "columns A and C for the GoCs in the Health perimeter list below. "
+    "`MP_GOC.csv` is wired and rewrites columns E, F, L, P based on "
+    "year, semester and business type.",
     icon="🚧",
 )
 
@@ -95,7 +97,7 @@ with col_sem:
         "Semester",
         options=[1, 2],
         horizontal=True,
-        format_func=lambda s: f"H{s}",
+        format_func=lambda s: "HY" if s == 1 else "FY",
     )
 with col_type:
     business_type = st.radio(
@@ -206,6 +208,7 @@ if run_clicked and uploaded and entity:
                 entity_name=entity_name,
                 year=int(year),
                 semester=int(semester),
+                business_type=business_type,
                 health_perimeter_gocs=list(goc_seg_list),
                 actuarial_aom_impact_pairs=aom_impact_pairs,
                 closing_curve_name=closing_curve_name.strip(),

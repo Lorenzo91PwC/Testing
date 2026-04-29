@@ -75,7 +75,7 @@ with col_main:
             "Semester",
             options=[1, 2],
             horizontal=True,
-            format_func=lambda s: f"H{s}",
+            format_func=lambda s: "HY" if s == 1 else "FY",
         )
     with col_type:
         business_type = st.radio(
