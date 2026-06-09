@@ -15,9 +15,13 @@ from excel_pipeline.pipeline import (
 
 
 def _read_csv(path: Path) -> list[tuple]:
-    """Read CSV rows; coerce numeric cells to int/float, '' to None."""
+    """Read CSV rows; coerce numeric cells to int/float, '' to None.
+
+    Uses ``;`` field separator and converts ``,`` decimal back to ``.``
+    so floats round-trip correctly (matches ``_write_csv_rows``).
+    """
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f)
+        reader = csv.reader(f, delimiter=";")
         rows: list[tuple] = []
         for raw in reader:
             cells = []
@@ -31,7 +35,7 @@ def _read_csv(path: Path) -> list[tuple]:
                 except ValueError:
                     pass
                 try:
-                    cells.append(float(cell))
+                    cells.append(float(cell.replace(",", ".")))
                     continue
                 except ValueError:
                     pass
@@ -41,8 +45,9 @@ def _read_csv(path: Path) -> list[tuple]:
 
 
 def _write_csv(path: Path, rows: list[tuple]) -> None:
+    """Write a CSV fixture using the project convention (``;`` separator)."""
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, delimiter=";")
         for row in rows:
             writer.writerow(["" if v is None else v for v in row])
 

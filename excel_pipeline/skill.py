@@ -46,19 +46,46 @@ def list_run_files(run_dir: Path) -> list[Path]:
 
 
 def _read_csv_table(path: str) -> list[list[Any]]:
-    """Read a CSV into a list of rows; empty cells are normalised to ``None``."""
+    """Read a CSV into a list of rows; empty cells are normalised to ``None``.
+
+    Uses the European convention (``;`` field separator), matching what
+    ``_write_csv_rows`` produces.
+    """
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f)
+        reader = csv.reader(f, delimiter=";")
         return [[(cell if cell != "" else None) for cell in row] for row in reader]
 
 
+def _format_csv_value(value: Any) -> str:
+    """Convert a Python value to its European-CSV string form.
+
+    ``None`` -> empty string. ``float`` -> ``str(value).replace('.', ',')``
+    so the decimal separator becomes a comma, e.g. ``12578297.451346``
+    becomes ``12578297,451346``. ``bool`` is preserved as ``True/False``.
+    Everything else (``int``, ``str``, ...) is passed through ``str``.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, float):
+        return repr(value).replace(".", ",")
+    return str(value)
+
+
 def _write_csv_rows(path: str, rows: Iterable[Iterable[Any]]) -> None:
-    """Write rows to a CSV file (UTF-8 with BOM), creating parent dirs."""
+    """Write rows to a CSV file (UTF-8 with BOM), creating parent dirs.
+
+    Uses the European convention so files open natively in Italian-locale
+    Excel: ``;`` is the field separator and floats are written with a
+    comma decimal (e.g. ``12578297,451346``). Integers keep their plain
+    integer form (no decimal point).
+    """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, delimiter=";")
         for row in rows:
-            writer.writerow(["" if v is None else v for v in row])
+            writer.writerow([_format_csv_value(v) for v in row])
 
 
 # ===========================================================================
@@ -252,7 +279,7 @@ def _load_transcodifica_table(path: str) -> dict[str, tuple[Any, Any]]:
     rows: list[list[Any]] = []
     if suffix == ".csv":
         with open(path, newline="", encoding="utf-8-sig") as f:
-            for raw in csv.reader(f):
+            for raw in csv.reader(f, delimiter=";"):
                 rows.append(list(raw))
     else:
         wb = openpyxl.load_workbook(path, data_only=True)

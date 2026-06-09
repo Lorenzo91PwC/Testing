@@ -38,9 +38,14 @@ def _pair(goc: str, year: int) -> dict:
 
 
 def _read_csv(path: Path) -> list[tuple]:
-    """Read CSV rows; coerce numeric cells to int/float, '' to None."""
+    """Read CSV rows; coerce numeric cells to int/float, '' to None.
+
+    Matches the European convention used by ``_write_csv_rows`` —
+    ``;`` field separator, ``,`` decimal — and converts ``"12,5"`` back
+    to ``12.5`` (float).
+    """
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f)
+        reader = csv.reader(f, delimiter=";")
         rows: list[tuple] = []
         for raw in reader:
             cells = []
@@ -54,7 +59,7 @@ def _read_csv(path: Path) -> list[tuple]:
                 except ValueError:
                     pass
                 try:
-                    cells.append(float(cell))
+                    cells.append(float(cell.replace(",", ".")))
                     continue
                 except ValueError:
                     pass
@@ -64,9 +69,9 @@ def _read_csv(path: Path) -> list[tuple]:
 
 
 def _write_csv(path: Path, rows: list[tuple]) -> None:
-    """Write rows to a CSV fixture (UTF-8 with BOM)."""
+    """Write rows to a CSV fixture (UTF-8 with BOM, ``;`` separator)."""
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, delimiter=";")
         for row in rows:
             writer.writerow(["" if v is None else v for v in row])
 
@@ -1272,9 +1277,9 @@ def _build_input_sunrise_rows_fixture(
 
 
 def _build_transcodifica_csv(path: Path, rows: list[tuple]) -> None:
-    """Build a Transcodifica CSV (header + data rows)."""
+    """Build a Transcodifica CSV (``;`` separator, header + data rows)."""
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, delimiter=";")
         w.writerow(["GOC", "Aggregation1", "Aggregation2"])
         for r in rows:
             w.writerow(r)
