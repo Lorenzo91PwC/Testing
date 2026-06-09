@@ -184,15 +184,20 @@ def run_phase1(
             f"Got: {[p.name for p in input_paths]}"
         )
 
-    current_date, previous_date = _expected_sunrise_dates(year, semester)
-    current_year_paths = [str(p) for p in sunrise_paths if current_date in p.name]
-    previous_year_paths = [str(p) for p in sunrise_paths if previous_date in p.name]
+    # For each Sunrise file extract ANNO_RIFERIMENTO from the date in its
+    # filename (validated upstream by validate_sunrise_inputs). Files whose
+    # name carries no recognizable date are skipped.
+    sources: list[tuple[str, int]] = []
+    for p in sunrise_paths:
+        m = _DATE_RE.search(p.name)
+        if m is None:
+            continue
+        sources.append((str(p), int(m.group(1))))
 
     transcodifica_path = _find_file_by_suffix(input_paths, TRANSCODIFICA_SUFFIX)
     mp_model_point_path = run_dir / "MP_ModelPoint.csv"
     create_mp_model_point(
-        current_year_paths=current_year_paths,
-        previous_year_paths=previous_year_paths,
+        sources=sources,
         transcodifica_path=str(transcodifica_path),
         output_path=str(mp_model_point_path),
         year=year,

@@ -1307,8 +1307,7 @@ def test_create_mp_model_point_happy_path(tmp_path: Path) -> None:
     output = tmp_path / "MP_ModelPoint.csv"
 
     result = create_mp_model_point(
-        current_year_paths=[str(curr)],
-        previous_year_paths=[str(prev)],
+        sources=[(str(curr), 2025), (str(prev), 2024)],
         transcodifica_path=str(transcodifica),
         output_path=str(output),
         year=2025,
@@ -1360,8 +1359,7 @@ def test_create_mp_model_point_folds_pre_horizon_years(tmp_path: Path) -> None:
     output = tmp_path / "MP_ModelPoint.csv"
 
     create_mp_model_point(
-        current_year_paths=[str(curr)],
-        previous_year_paths=[],
+        sources=[(str(curr), 2025)],
         transcodifica_path=str(transcodifica),
         output_path=str(output),
         year=2025,
@@ -1395,8 +1393,7 @@ def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
     output = tmp_path / "MP_ModelPoint.csv"
 
     create_mp_model_point(
-        current_year_paths=[str(curr)],
-        previous_year_paths=[],
+        sources=[(str(curr), 2025)],
         transcodifica_path=str(transcodifica),
         output_path=str(output),
         year=2025,
@@ -1421,8 +1418,7 @@ def test_create_mp_model_point_missing_transcodifica_entry_is_empty(
     output = tmp_path / "MP_ModelPoint.csv"
 
     create_mp_model_point(
-        current_year_paths=[str(curr)],
-        previous_year_paths=[],
+        sources=[(str(curr), 2025)],
         transcodifica_path=str(transcodifica),
         output_path=str(output),
         year=2025,
