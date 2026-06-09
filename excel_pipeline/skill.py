@@ -416,11 +416,23 @@ def _emit_mp_model_point_rows(
     for rows whose ``ANNO_RIFERIMENTO`` equals the previous year
     (``@Opening``). Pre-horizon years are summed into the oldest-year
     row, creating it if not already present.
+
+    GoCs whose ``SINISTRI`` and ``RISERVA_SINISTRI`` are zero on every
+    row of the master table (across all source files and all years) are
+    omitted from the output entirely.
     """
     rows: list[list[Any]] = []
     if not master:
         return rows
     min_year = year - 15
+
+    # First pass: which GoCs have at least one non-zero SINISTRI or
+    # RISERVA_SINISTRI value somewhere in the master? GoCs that are all
+    # zeros are excluded from the output.
+    nonzero_gocs: set[str] = set()
+    for entry in master:
+        if entry["SINISTRI"] != 0.0 or entry["RISERVA_SINISTRI"] != 0.0:
+            nonzero_gocs.add(entry["GOC"])
 
     # Group by (ANNO_RIFERIMENTO, GOC) preserving insertion order.
     grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
@@ -429,6 +441,8 @@ def _emit_mp_model_point_rows(
         grouped.setdefault(key, []).append(entry)
 
     for (anno_rif, goc), entries in grouped.items():
+        if goc not in nonzero_gocs:
+            continue
         if anno_rif == year:
             max_year = year
             observation_suffix = "Closing"

@@ -1433,3 +1433,74 @@ def test_create_mp_model_point_missing_transcodifica_entry_is_empty(
     assert rows[1][0] == "ITUNKNOWN2025@2025"
     assert rows[1][5] is None  # Aggregation1 missing
     assert rows[1][6] is None  # Aggregation2 missing
+
+
+def test_create_mp_model_point_drops_all_zero_gocs(tmp_path: Path) -> None:
+    """A GoC whose SINISTRI and RISERVA_SINISTRI are 0 everywhere is excluded."""
+    curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_rows_fixture(
+        curr,
+        [
+            # GoC with mixed values — kept
+            ("IT_KEEP", 2025, "INTERNA", 100.0, 200.0),
+            ("IT_KEEP", 2024, "INTERNA", 0.0, 0.0),
+            # GoC with all-zero values across every row — dropped
+            ("IT_DROP_ALLZERO", 2025, "INTERNA", 0.0, 0.0),
+            ("IT_DROP_ALLZERO", 2024, "INTERNA", 0.0, 0.0),
+            ("IT_DROP_ALLZERO", 2023, "INTERNA", 0.0, 0.0),
+            # Edge case: a single non-zero row keeps the GoC
+            ("IT_KEEP_ONE", 2024, "INTERNA", 0.0, 0.0),
+            ("IT_KEEP_ONE", 2023, "INTERNA", 0.0, 0.01),
+        ],
+    )
+    transcodifica = tmp_path / "3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(transcodifica, [])
+    output = tmp_path / "MP_ModelPoint.csv"
+
+    create_mp_model_point(
+        sources=[(str(curr), 2025)],
+        transcodifica_path=str(transcodifica),
+        output_path=str(output),
+        year=2025,
+    )
+
+    rows = _read_csv(output)
+    goc_ids_in_output = {r[1] for r in rows[1:]}
+    # IT_KEEP and IT_KEEP_ONE survive (at least one non-zero row each)
+    assert any(g.startswith("IT_KEEP") for g in goc_ids_in_output)
+    assert any(g.startswith("IT_KEEP_ONE") for g in goc_ids_in_output)
+    # IT_DROP_ALLZERO is excluded entirely
+    assert not any(g.startswith("IT_DROP_ALLZERO") for g in goc_ids_in_output)
+
+
+def test_create_mp_model_point_keeps_goc_with_value_in_other_file(
+    tmp_path: Path,
+) -> None:
+    """All-zero in current-year file but non-zero in previous-year file -> kept."""
+    curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    prev = tmp_path / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_rows_fixture(
+        curr,
+        [("IT_CROSS", 2025, "INTERNA", 0.0, 0.0)],
+    )
+    _build_input_sunrise_rows_fixture(
+        prev,
+        [("IT_CROSS", 2024, "INTERNA", 5.0, 0.0)],
+    )
+    transcodifica = tmp_path / "3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(transcodifica, [])
+    output = tmp_path / "MP_ModelPoint.csv"
+
+    create_mp_model_point(
+        sources=[(str(curr), 2025), (str(prev), 2024)],
+        transcodifica_path=str(transcodifica),
+        output_path=str(output),
+        year=2025,
+    )
+
+    rows = _read_csv(output)
+    # Both the @Closing (2025-file) and @Opening (2024-file) rows are emitted
+    # because the GoC has at least one non-zero value somewhere.
+    obs_keys = {r[2] for r in rows[1:]}
+    assert "IT_CROSS@Closing" in obs_keys
+    assert "IT_CROSS@Opening" in obs_keys

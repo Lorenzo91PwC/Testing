@@ -142,9 +142,13 @@ def test_run_phase1_emits_only_mp_model_point(tmp_path: Path) -> None:
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
     ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_curr, ["Motor", "Property"], year=2025)
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor", "Property"], year=2025, sinistri=100.0, riserva=50.0,
+    )
     ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_prev, ["Property", "Liability"], year=2024)
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Property", "Liability"], year=2024, sinistri=80.0, riserva=40.0,
+    )
     transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
     _write_csv(
         transcodifica,
