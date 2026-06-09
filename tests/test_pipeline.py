@@ -126,7 +126,14 @@ def test_run_phase1_happy_path_multi_entity(tmp_path: Path) -> None:
     ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
     _build_input_sunrise_workbook(ceded_prev, ["Property", "Liability"])
     transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
-    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
+    _write_csv(
+        transcodifica,
+        [
+            ("GOC", "Aggregation1", "Aggregation2"),
+            ("Motor", "Agg1_Motor", "Agg2_Motor"),
+            ("Property", "Agg1_Prop", "Agg2_Prop"),
+        ],
+    )
     payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
     _build_payment_patterns_fixture(payments)
 
@@ -146,14 +153,15 @@ def test_run_phase1_happy_path_multi_entity(tmp_path: Path) -> None:
 
     outputs = result["outputs"]
     assert outputs == [
+        tmp_path / "MP_ModelPoint.csv",
         tmp_path / "MP_LoB.csv",
         tmp_path / "MP_ObservationYear.csv",
         tmp_path / "Risk_Adjustment.csv",
         tmp_path / "Payment_pattern.csv",
     ]
 
-    # MP_LoB: one row per (GoC, entity) — 3 GoCs * 2 entities = 6 data rows
-    mp_lob = _read_csv(outputs[0])
+    # MP_LoB is now at index 1; one row per (GoC, entity) — 3 GoCs * 2 entities = 6
+    mp_lob = _read_csv(outputs[1])
     assert mp_lob == [
         ("GoC_ID", "Entity_ID"),
         ("Motor", 6),
@@ -164,8 +172,8 @@ def test_run_phase1_happy_path_multi_entity(tmp_path: Path) -> None:
         ("Liability", 14),
     ]
 
-    # H2 2025 Risk Adjustment values
-    ra = _read_csv(outputs[2])
+    # H2 2025 Risk Adjustment values (now at index 3 after MP_ModelPoint + MP_LoB + MP_ObservationYear)
+    ra = _read_csv(outputs[3])
     assert ra == [
         ("ObservationID", "Risk_Adjustment"),
         ("Motor@Opening", 110),

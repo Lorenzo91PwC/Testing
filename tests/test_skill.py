@@ -13,6 +13,7 @@ from excel_pipeline.skill import (
     create_empty_csv,
     create_mandatory_actuals,
     create_mp_lob,
+    create_mp_model_point,
     create_mp_observation_year,
     create_new_business_ppos,
     create_payment_pattern,
@@ -1247,3 +1248,187 @@ def test_update_mp_goc_invalid_semester(tmp_path: Path) -> None:
             input_path=str(fixture), output_path=str(output),
             year=2025, semester=3, business_type="Diretto",
         )
+
+
+def _build_input_sunrise_rows_fixture(
+    path: Path, rows: list[tuple[str, int, str, float, float]]
+) -> None:
+    """Build an Input_Sunrise workbook with 5 columns. ``rows`` is data only."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GOC")
+    ws.cell(row=1, column=2, value="ANNO")
+    ws.cell(row=1, column=3, value="PERIMETRO")
+    ws.cell(row=1, column=4, value="SINISTRI")
+    ws.cell(row=1, column=5, value="RISERVA_SINISTRI")
+    for i, (goc, yr, peri, sin, ris) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1, value=goc)
+        ws.cell(row=i, column=2, value=yr)
+        ws.cell(row=i, column=3, value=peri)
+        ws.cell(row=i, column=4, value=sin)
+        ws.cell(row=i, column=5, value=ris)
+    wb.save(path)
+
+
+def _build_transcodifica_csv(path: Path, rows: list[tuple]) -> None:
+    """Build a Transcodifica CSV (header + data rows)."""
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["GOC", "Aggregation1", "Aggregation2"])
+        for r in rows:
+            w.writerow(r)
+
+
+def test_create_mp_model_point_happy_path(tmp_path: Path) -> None:
+    """Two files (current + previous), sums per (GoC, year), aggregations."""
+    curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    prev = tmp_path / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_rows_fixture(
+        curr,
+        [
+            ("IT05PABPPLE", 2025, "INTERNA", 100.0, 200.0),
+            ("IT05PABPPLE", 2024, "INTERNA", 50.0, 75.0),
+            # Same (GoC, year) — should be summed
+            ("IT05PABPPLE", 2024, "INTERNA", 25.0, 25.0),
+        ],
+    )
+    _build_input_sunrise_rows_fixture(
+        prev,
+        [
+            ("IT05PABPPLE", 2024, "INTERNA", 80.0, 90.0),
+        ],
+    )
+    transcodifica = tmp_path / "3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(
+        transcodifica,
+        [("IT05PABPPLE", "Commercial P&C", "PAA_Direct")],
+    )
+    output = tmp_path / "MP_ModelPoint.csv"
+
+    result = create_mp_model_point(
+        current_year_paths=[str(curr)],
+        previous_year_paths=[str(prev)],
+        transcodifica_path=str(transcodifica),
+        output_path=str(output),
+        year=2025,
+    )
+
+    assert result["rows"] == 3  # 2 from current, 1 from previous
+    assert result["columns"][0] == "Primary_Key"
+
+    rows = _read_csv(output)
+    # Header
+    assert rows[0] == tuple(result["columns"])
+    # Current-year rows: 2025 then 2024 (descending), @Closing
+    assert rows[1] == (
+        "IT05PABPPLE2025@2025", "IT05PABPPLE2025", "IT05PABPPLE@Closing",
+        2025, 2025, "Commercial P&C", "PAA_Direct",
+        200.0, 0, 100.0, 0,
+    )
+    # 2024 is summed: 50+25=75 sinistri, 75+25=100 riserva
+    assert rows[2] == (
+        "IT05PABPPLE2024@2025", "IT05PABPPLE2024", "IT05PABPPLE@Closing",
+        2024, 2025, "Commercial P&C", "PAA_Direct",
+        100.0, 0, 75.0, 0,
+    )
+    # Previous-year file row: 2024 only, @Opening
+    assert rows[3] == (
+        "IT05PABPPLE2024@2024", "IT05PABPPLE2024", "IT05PABPPLE@Opening",
+        2024, 2024, "Commercial P&C", "PAA_Direct",
+        90.0, 0, 80.0, 0,
+    )
+
+
+def test_create_mp_model_point_folds_pre_horizon_years(tmp_path: Path) -> None:
+    """Years older than year-15 are summed into the oldest year of the horizon."""
+    curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_rows_fixture(
+        curr,
+        [
+            # min_year = 2025 - 15 = 2010 — these three are pre-horizon
+            ("IT05PABPPLE", 2007, "INTERNA", 10.0, 1.0),
+            ("IT05PABPPLE", 2008, "INTERNA", 20.0, 2.0),
+            ("IT05PABPPLE", 2009, "INTERNA", 30.0, 3.0),
+            # In-horizon
+            ("IT05PABPPLE", 2010, "INTERNA", 5.0, 0.5),
+            ("IT05PABPPLE", 2025, "INTERNA", 100.0, 200.0),
+        ],
+    )
+    transcodifica = tmp_path / "3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(transcodifica, [])
+    output = tmp_path / "MP_ModelPoint.csv"
+
+    create_mp_model_point(
+        current_year_paths=[str(curr)],
+        previous_year_paths=[],
+        transcodifica_path=str(transcodifica),
+        output_path=str(output),
+        year=2025,
+    )
+
+    rows = _read_csv(output)
+    # Two rows: 2025 (latest) and 2010 (folded pre-horizon)
+    assert len(rows) == 3  # header + 2 data rows
+    assert rows[1][3] == 2025  # Accident_Year of newest row
+    assert rows[2][3] == 2010  # Accident_Year of oldest row
+    # 2010 row: 5 + (10+20+30) = 65 sinistri, 0.5 + (1+2+3) = 6.5 riserva
+    assert rows[2][9] == 65.0  # Claims_Paid
+    assert rows[2][7] == 6.5  # EAXA_Reserve
+
+
+def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
+    tmp_path: Path,
+) -> None:
+    """If min_year has no native data, the folded row is still emitted."""
+    curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_rows_fixture(
+        curr,
+        [
+            # Only pre-horizon data
+            ("IT05PABPPLE", 2007, "INTERNA", 10.0, 1.0),
+            ("IT05PABPPLE", 2008, "INTERNA", 20.0, 2.0),
+        ],
+    )
+    transcodifica = tmp_path / "3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(transcodifica, [])
+    output = tmp_path / "MP_ModelPoint.csv"
+
+    create_mp_model_point(
+        current_year_paths=[str(curr)],
+        previous_year_paths=[],
+        transcodifica_path=str(transcodifica),
+        output_path=str(output),
+        year=2025,
+    )
+
+    rows = _read_csv(output)
+    assert len(rows) == 2  # header + 1 row at 2010
+    assert rows[1][3] == 2010
+    assert rows[1][9] == 30.0  # 10 + 20
+
+
+def test_create_mp_model_point_missing_transcodifica_entry_is_empty(
+    tmp_path: Path,
+) -> None:
+    curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_rows_fixture(
+        curr,
+        [("ITUNKNOWN", 2025, "INTERNA", 1.0, 2.0)],
+    )
+    transcodifica = tmp_path / "3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(transcodifica, [])  # empty
+    output = tmp_path / "MP_ModelPoint.csv"
+
+    create_mp_model_point(
+        current_year_paths=[str(curr)],
+        previous_year_paths=[],
+        transcodifica_path=str(transcodifica),
+        output_path=str(output),
+        year=2025,
+    )
+
+    rows = _read_csv(output)
+    assert rows[1][0] == "ITUNKNOWN2025@2025"
+    assert rows[1][5] is None  # Aggregation1 missing
+    assert rows[1][6] is None  # Aggregation2 missing

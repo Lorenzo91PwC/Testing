@@ -241,6 +241,171 @@ def extract_unique_goc_cohort_pairs(
     return {"sheet": sheet, "count": len(pairs), "pairs": pairs}
 
 
+def _load_transcodifica_table(path: str) -> dict[str, tuple[Any, Any]]:
+    """Load the Transcodifica master list as ``{goc: (agg1, agg2)}``.
+
+    Supports CSV and XLSX inputs. The file is expected to have the GoC
+    code in column A, Aggregation1 in column B, Aggregation2 in column C,
+    and a header row that we skip.
+    """
+    suffix = Path(path).suffix.lower()
+    rows: list[list[Any]] = []
+    if suffix == ".csv":
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            for raw in csv.reader(f):
+                rows.append(list(raw))
+    else:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb.active
+        for r in range(1, ws.max_row + 1):
+            rows.append([ws.cell(row=r, column=c).value for c in range(1, 4)])
+
+    table: dict[str, tuple[Any, Any]] = {}
+    for row in rows[1:]:  # skip header
+        if not row or row[0] is None:
+            continue
+        key = str(row[0]).strip()
+        if not key:
+            continue
+        agg1 = row[1] if len(row) > 1 else None
+        agg2 = row[2] if len(row) > 2 else None
+        table[key] = (agg1, agg2)
+    return table
+
+
+def create_mp_model_point(
+    current_year_paths: list[str],
+    previous_year_paths: list[str],
+    transcodifica_path: str,
+    output_path: str,
+    year: int,
+) -> dict[str, Any]:
+    """Create ``MP_ModelPoint.csv`` from Input_Sunrise sheets.
+
+    Two groups of input files are processed:
+    - ``current_year_paths``: files whose name carries the analysis-year
+      date (e.g. ``2025.12.31``). Horizon is ``[year - 15, year]``, the
+      observation year is ``year`` and ``ObservationKey`` ends in
+      ``@Closing``.
+    - ``previous_year_paths``: files whose name carries the previous-
+      year date (e.g. ``2024.12.31``). Horizon is ``[year - 15, year - 1]``,
+      the observation year is ``year - 1`` and ``ObservationKey`` ends in
+      ``@Opening``.
+
+    For each file the ``Input_Sunrise`` sheet is read (column A = GoC,
+    column B = accident year, column D = SINISTRI, column E =
+    RISERVA_SINISTRI). Rows are aggregated per ``(GoC, accident_year)``
+    by summing SINISTRI and RISERVA_SINISTRI. Years strictly older than
+    the horizon's oldest year are summed into the oldest-year row
+    (creating it if not present).
+
+    Aggregation1 / Aggregation2 are looked up in the Transcodifica table
+    by GoC; missing keys produce empty values. ULAE_Reserve and
+    Cost_ULAE are always 0.
+    """
+    transcodifica = _load_transcodifica_table(transcodifica_path)
+    min_year = year - 15
+
+    headers = [
+        "Primary_Key", "GOC_ID", "ObservationKey",
+        "Accident_Year", "Observation_Year",
+        "Aggregation1", "Aggregation2",
+        "EAXA_Reserve", "ULAE_Reserve",
+        "Claims_Paid", "Cost_ULAE",
+    ]
+    out_rows: list[list[Any]] = [headers]
+
+    groups = [
+        (current_year_paths, year, year, "Closing"),
+        (previous_year_paths, year - 1, year - 1, "Opening"),
+    ]
+    for paths, obs_year, max_year, observation_suffix in groups:
+        for path in paths:
+            wb = openpyxl.load_workbook(path, data_only=True)
+            if "Input_Sunrise" not in wb.sheetnames:
+                raise KeyError(
+                    f"Sheet 'Input_Sunrise' not found in '{path}'. "
+                    f"Available sheets: {wb.sheetnames}"
+                )
+            ws = wb["Input_Sunrise"]
+
+            # Aggregate (goc, accident_year) -> [sum_sinistri, sum_riserva]
+            # while preserving GoC first-seen order.
+            goc_order: list[str] = []
+            seen_gocs: set[str] = set()
+            agg: dict[tuple[str, int], list[float]] = {}
+            for r in range(2, ws.max_row + 1):
+                goc_v = ws.cell(row=r, column=1).value
+                year_v = ws.cell(row=r, column=2).value
+                if goc_v is None or year_v is None:
+                    continue
+                goc = str(goc_v).strip()
+                if not goc:
+                    continue
+                try:
+                    acc_year = int(year_v)
+                except (TypeError, ValueError):
+                    continue
+                sin_v = ws.cell(row=r, column=4).value
+                ris_v = ws.cell(row=r, column=5).value
+                sinistri = float(sin_v) if sin_v is not None else 0.0
+                riserva = float(ris_v) if ris_v is not None else 0.0
+
+                if goc not in seen_gocs:
+                    seen_gocs.add(goc)
+                    goc_order.append(goc)
+
+                key = (goc, acc_year)
+                if key in agg:
+                    agg[key][0] += sinistri
+                    agg[key][1] += riserva
+                else:
+                    agg[key] = [sinistri, riserva]
+
+            # Per GoC, fold pre-horizon years into min_year and emit rows.
+            for goc in goc_order:
+                pre_horizon_sin = 0.0
+                pre_horizon_ris = 0.0
+                in_horizon: dict[int, list[float]] = {}
+                for (g, y), (s, r) in agg.items():
+                    if g != goc:
+                        continue
+                    if y < min_year:
+                        pre_horizon_sin += s
+                        pre_horizon_ris += r
+                    elif y <= max_year:
+                        in_horizon[y] = [s, r]
+                    # y > max_year is dropped silently — shouldn't happen
+                    # for historical inputs.
+
+                if pre_horizon_sin != 0.0 or pre_horizon_ris != 0.0:
+                    cur = in_horizon.setdefault(min_year, [0.0, 0.0])
+                    cur[0] += pre_horizon_sin
+                    cur[1] += pre_horizon_ris
+
+                agg1, agg2 = transcodifica.get(goc, (None, None))
+
+                for acc_year in sorted(in_horizon.keys(), reverse=True):
+                    sinistri, riserva = in_horizon[acc_year]
+                    goc_id = f"{goc}{acc_year}"
+                    primary_key = f"{goc_id}@{obs_year}"
+                    observation_key = f"{goc}@{observation_suffix}"
+                    out_rows.append([
+                        primary_key, goc_id, observation_key,
+                        acc_year, obs_year,
+                        agg1, agg2,
+                        riserva, 0,
+                        sinistri, 0,
+                    ])
+
+    _write_csv_rows(output_path, out_rows)
+    return {
+        "output_path": output_path,
+        "rows": len(out_rows) - 1,
+        "columns": headers,
+    }
+
+
 def create_mp_lob(
     goc_names: list[str],
     entities: list[tuple[int, str]],

@@ -22,6 +22,7 @@ from .skill import (
     create_empty_csv,
     create_mandatory_actuals,
     create_mp_lob,
+    create_mp_model_point,
     create_mp_observation_year,
     create_new_business_ppos,
     create_payment_pattern,
@@ -158,6 +159,11 @@ def run_phase1(
 
     Writes:
 
+    - ``{run_dir}/MP_ModelPoint.csv`` — one row per ``(GoC, accident_year,
+      observation_year)`` across both the analysis-date and previous-
+      year files; pre-horizon years are folded into the oldest year of
+      the horizon; Aggregation1/2 come from the Transcodifica master
+      list;
     - ``{run_dir}/MP_LoB.csv`` — one row per ``(GoC, entity)`` pair when
       multiple entities are selected;
     - ``{run_dir}/MP_ObservationYear.csv`` — two rows per GoC
@@ -189,6 +195,23 @@ def run_phase1(
     goc_names = extract_input_sunrise_goc_names(
         [str(p) for p in sunrise_paths]
     )["values"]
+
+    # Split Ceded/Assumed inputs by analysis date so we can build the
+    # MP_ModelPoint output (the only Sunrise step that distinguishes
+    # the current-year file from the previous-year file).
+    current_date, previous_date = _expected_sunrise_dates(year, semester)
+    current_year_paths = [str(p) for p in sunrise_paths if current_date in p.name]
+    previous_year_paths = [str(p) for p in sunrise_paths if previous_date in p.name]
+
+    transcodifica_path = _find_file_by_suffix(input_paths, TRANSCODIFICA_SUFFIX)
+    mp_model_point_path = run_dir / "MP_ModelPoint.csv"
+    create_mp_model_point(
+        current_year_paths=current_year_paths,
+        previous_year_paths=previous_year_paths,
+        transcodifica_path=str(transcodifica_path),
+        output_path=str(mp_model_point_path),
+        year=year,
+    )
 
     mp_lob_path = run_dir / "MP_LoB.csv"
     create_mp_lob(
@@ -231,7 +254,13 @@ def run_phase1(
     )
 
     return {
-        "outputs": [mp_lob_path, mp_obs_path, ra_path, payment_pattern_path],
+        "outputs": [
+            mp_model_point_path,
+            mp_lob_path,
+            mp_obs_path,
+            ra_path,
+            payment_pattern_path,
+        ],
         "goc_names": goc_names,
         "entities": entities,
         "year": year,
