@@ -174,16 +174,33 @@ def test_run_phase1_emits_only_mp_model_point(tmp_path: Path) -> None:
     assert result["year"] == 2025
     assert result["semester"] == 2
 
-    # Only MP_ModelPoint is produced for now.
     outputs = result["outputs"]
-    assert outputs == [tmp_path / "MP_ModelPoint.csv"]
-    assert outputs[0].exists()
+    assert outputs == [
+        tmp_path / "MP_ModelPoint.csv",
+        tmp_path / "MP_LoB.csv",
+        tmp_path / "MP_ObservationYear.csv",
+    ]
+    for p in outputs:
+        assert p.exists()
 
+    # MP_ModelPoint has data rows from both source files.
     rows = _read_csv(outputs[0])
-    # Header + at least one data row from each file (Motor/Property at 2025,
-    # Property/Liability at 2024) — exact contents are covered by skill tests.
     assert rows[0][0] == "Primary_Key"
     assert len(rows) > 1
+
+    # MP_LoB: one row per (GoC, entity). Filtered to non-zero GoCs
+    # (Motor, Property and Liability all have non-zero sinistri/riserva
+    # in the fixture). 3 GoCs * 2 entities = 6 rows.
+    mp_lob_rows = _read_csv(outputs[1])
+    assert mp_lob_rows[0] == ("GoC_ID", "Entity_ID")
+    assert len(mp_lob_rows) == 1 + 3 * 2
+
+    # MP_ObservationYear: two rows per GoC (@Opening + @Closing).
+    mp_obs_rows = _read_csv(outputs[2])
+    assert mp_obs_rows[0] == (
+        "ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY",
+    )
+    assert len(mp_obs_rows) == 1 + 3 * 2
 
 
 def test_run_phase1_raises_without_any_ceded_or_assumed(tmp_path: Path) -> None:

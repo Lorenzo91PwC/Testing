@@ -147,28 +147,33 @@ def run_phase1(
     year: int,
     semester: int,
 ) -> dict[str, Any]:
-    """Phase 1 — currently runs only the MP_ModelPoint step.
+    """Phase 1 — Sunrise main outputs.
 
-    The legacy MP_LoB / MP_ObservationYear / Risk_Adjustment /
-    Payment_pattern steps are temporarily skipped while we focus on the
-    MP_ModelPoint output. The matching skill functions remain available
-    in ``skill.py`` and can be re-enabled here at any time without other
-    changes.
+    The Risk_Adjustment and Payment_pattern steps are still skipped (the
+    Payment_Patterns_&_Risk_Adjustments workbook may be uploaded but is
+    not read yet); they can be re-enabled when needed.
 
     Inputs consumed:
-    - the union of ``_Ceded`` / ``_Assumed`` files (split internally by
-      analysis date: current-year vs previous-year), used to build
-      ``MP_ModelPoint.csv``;
-    - the ``Transcodifica_aggregazione_GOC_H_NH`` master list, used to
-      populate Aggregation1 / Aggregation2 on each MP_ModelPoint row.
+    - the union of ``_Ceded`` / ``_Assumed`` files, used to build the
+      GoC list and ``MP_ModelPoint.csv``;
+    - the ``Transcodifica_aggregazione_GOC_H_NH`` master list, used for
+      MP_ModelPoint's Aggregation1 / Aggregation2 columns.
 
-    The Payment_Patterns_&_Risk_Adjustments workbook may still be
-    uploaded but is not read in this reduced flow.
+    Outputs produced:
+    - ``MP_ModelPoint.csv`` (driven by SINISTRI / RISERVA_SINISTRI; GoCs
+      whose values are all zero are excluded);
+    - ``MP_LoB.csv`` (one row per ``(GoC, entity)`` pair);
+    - ``MP_ObservationYear.csv`` (two rows per GoC: ``@Opening`` with
+      ``year - 1`` and ``@Closing`` with ``year``).
+
+    The GoC list shared by MP_LoB and MP_ObservationYear is whatever
+    ``create_mp_model_point`` returns — i.e. it follows the same
+    all-zero-drop rule as MP_ModelPoint, so the three files are
+    consistent.
 
     Returns a dict with:
-    - ``outputs``: ``[MP_ModelPoint.csv]``;
-    - ``entities``, ``year``, ``semester``: echoed for downstream
-      consumers (e.g. the Astra page reads them from session state).
+    - ``outputs``: the produced files in order;
+    - ``entities``, ``year``, ``semester``: echoed.
 
     Callers should run ``validate_sunrise_inputs`` first to surface a
     clear UI error when an expected file is missing.
@@ -196,15 +201,30 @@ def run_phase1(
 
     transcodifica_path = _find_file_by_suffix(input_paths, TRANSCODIFICA_SUFFIX)
     mp_model_point_path = run_dir / "MP_ModelPoint.csv"
-    create_mp_model_point(
+    mp_result = create_mp_model_point(
         sources=sources,
         transcodifica_path=str(transcodifica_path),
         output_path=str(mp_model_point_path),
         year=year,
     )
+    goc_list = mp_result["goc_list"]
+
+    mp_lob_path = run_dir / "MP_LoB.csv"
+    create_mp_lob(
+        goc_names=goc_list,
+        entities=entities,
+        output_path=str(mp_lob_path),
+    )
+
+    mp_obs_path = run_dir / "MP_ObservationYear.csv"
+    create_mp_observation_year(
+        goc_names=goc_list,
+        year=year,
+        output_path=str(mp_obs_path),
+    )
 
     return {
-        "outputs": [mp_model_point_path],
+        "outputs": [mp_model_point_path, mp_lob_path, mp_obs_path],
         "entities": entities,
         "year": year,
         "semester": semester,

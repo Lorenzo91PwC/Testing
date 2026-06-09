@@ -525,13 +525,18 @@ def create_mp_model_point(
     """
     transcodifica = _load_transcodifica_table(transcodifica_path)
     goc_list, master = build_input_sunrise_master_table(sources)
+    nonzero = {
+        e["GOC"] for e in master
+        if e["SINISTRI"] != 0.0 or e["RISERVA_SINISTRI"] != 0.0
+    }
+    filtered_goc_list = [g for g in goc_list if g in nonzero]
     out_rows = _emit_mp_model_point_rows(master, transcodifica, year)
     _write_csv_rows(output_path, [MP_MODEL_POINT_HEADERS, *out_rows])
     return {
         "output_path": output_path,
         "rows": len(out_rows),
         "columns": MP_MODEL_POINT_HEADERS,
-        "goc_list": goc_list,
+        "goc_list": filtered_goc_list,
     }
 
 
