@@ -149,27 +149,30 @@ def run_phase1(
 ) -> dict[str, Any]:
     """Phase 1 — Sunrise main outputs.
 
-    The Risk_Adjustment and Payment_pattern steps are still skipped (the
-    Payment_Patterns_&_Risk_Adjustments workbook may be uploaded but is
-    not read yet); they can be re-enabled when needed.
-
     Inputs consumed:
     - the union of ``_Ceded`` / ``_Assumed`` files, used to build the
       GoC list and ``MP_ModelPoint.csv``;
     - the ``Transcodifica_aggregazione_GOC_H_NH`` master list, used for
-      MP_ModelPoint's Aggregation1 / Aggregation2 columns.
+      MP_ModelPoint's Aggregation1 / Aggregation2 columns;
+    - the ``Payment_Patterns_&_Risk_Adjustments`` workbook, used for
+      ``Risk_Adjustment.csv`` and ``Payment_pattern.csv`` (sheets
+      ``ra_AAI_REINS`` and ``pp_AAI_REINS``).
 
     Outputs produced:
     - ``MP_ModelPoint.csv`` (driven by SINISTRI / RISERVA_SINISTRI; GoCs
       whose values are all zero are excluded);
     - ``MP_LoB.csv`` (one row per ``(GoC, entity)`` pair);
     - ``MP_ObservationYear.csv`` (two rows per GoC: ``@Opening`` with
-      ``year - 1`` and ``@Closing`` with ``year``).
+      ``year - 1`` and ``@Closing`` with ``year``);
+    - ``Risk_Adjustment.csv`` (two rows per GoC with the Opening/Closing
+      Risk Adjustment values from the Payment_Patterns workbook);
+    - ``Payment_pattern.csv`` (25 columns ``GoC, Year, 0..22``; two rows
+      per GoC for ``year`` and ``year - 1``).
 
-    The GoC list shared by MP_LoB and MP_ObservationYear is whatever
+    The GoC list shared by every downstream output is whatever
     ``create_mp_model_point`` returns — i.e. it follows the same
-    all-zero-drop rule as MP_ModelPoint, so the three files are
-    consistent.
+    all-zero-drop rule as MP_ModelPoint, so all files report the same
+    GoC universe.
 
     Returns a dict with:
     - ``outputs``: the produced files in order;
@@ -223,8 +226,40 @@ def run_phase1(
         output_path=str(mp_obs_path),
     )
 
+    pp_path = _find_file_by_suffix(input_paths, PAYMENT_PATTERNS_SUFFIX)
+    ra_values = lookup_risk_adjustment_values(
+        path=str(pp_path),
+        goc_names=goc_list,
+        year=year,
+        semester=semester,
+    )
+    ra_path = run_dir / "Risk_Adjustment.csv"
+    create_risk_adjustment(
+        goc_names=goc_list,
+        values=ra_values,
+        output_path=str(ra_path),
+    )
+
+    pp_rows = lookup_payment_pattern_values(
+        path=str(pp_path),
+        goc_names=goc_list,
+        year=year,
+        semester=semester,
+    )
+    payment_pattern_path = run_dir / "Payment_pattern.csv"
+    create_payment_pattern(
+        rows=pp_rows,
+        output_path=str(payment_pattern_path),
+    )
+
     return {
-        "outputs": [mp_model_point_path, mp_lob_path, mp_obs_path],
+        "outputs": [
+            mp_model_point_path,
+            mp_lob_path,
+            mp_obs_path,
+            ra_path,
+            payment_pattern_path,
+        ],
         "entities": entities,
         "year": year,
         "semester": semester,

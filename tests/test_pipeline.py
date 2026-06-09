@@ -179,6 +179,8 @@ def test_run_phase1_emits_only_mp_model_point(tmp_path: Path) -> None:
         tmp_path / "MP_ModelPoint.csv",
         tmp_path / "MP_LoB.csv",
         tmp_path / "MP_ObservationYear.csv",
+        tmp_path / "Risk_Adjustment.csv",
+        tmp_path / "Payment_pattern.csv",
     ]
     for p in outputs:
         assert p.exists()
@@ -201,6 +203,17 @@ def test_run_phase1_emits_only_mp_model_point(tmp_path: Path) -> None:
         "ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY",
     )
     assert len(mp_obs_rows) == 1 + 3 * 2
+
+    # Risk_Adjustment: two rows per GoC (@Opening + @Closing).
+    ra_rows = _read_csv(outputs[3])
+    assert ra_rows[0] == ("ObservationID", "Risk_Adjustment")
+    assert len(ra_rows) == 1 + 3 * 2
+
+    # Payment_pattern: 25 columns (GoC, Year, 0..22); 2 rows per GoC.
+    pp_rows = _read_csv(outputs[4])
+    assert pp_rows[0][:2] == ("GoC", "Year")
+    assert pp_rows[0][2:] == tuple(range(23))
+    assert len(pp_rows) == 1 + 3 * 2
 
 
 def test_run_phase1_raises_without_any_ceded_or_assumed(tmp_path: Path) -> None:
