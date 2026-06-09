@@ -19,6 +19,7 @@ from excel_pipeline.skill import (
     create_reinsurance,
     create_risk_adjustment,
     append_actuarial_aom_impact,
+    extract_input_sunrise_goc_names,
     extract_unique_goc_cohort_pairs,
     extract_unique_goc_names,
     lookup_payment_pattern_values,
@@ -107,6 +108,50 @@ def test_extract_unique_goc_names(tmp_path: Path) -> None:
     assert result["count"] == 3
 
 
+def _build_input_sunrise_fixture(path: Path, gocs: list[str | None]) -> None:
+    """Workbook with an Input_Sunrise sheet — col A from row 2 contains gocs."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    # Header row matches the spec: 5 columns
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=3, value="Perimetro")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    for i, g in enumerate(gocs, start=2):
+        ws.cell(row=i, column=1, value=g)
+    wb.save(path)
+
+
+def test_extract_input_sunrise_goc_names_union_across_files(tmp_path: Path) -> None:
+    f1 = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    f2 = tmp_path / "1.2_2025.12.31_AAI_Assumed.xlsx"
+    f3 = tmp_path / "1.3_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_fixture(f1, ["Motor", "Property", "  Motor  ", None, ""])
+    _build_input_sunrise_fixture(f2, ["Property", "Liability"])  # Property dup
+    _build_input_sunrise_fixture(f3, ["Marine", "Motor"])  # Motor dup, Marine new
+
+    result = extract_input_sunrise_goc_names(
+        [str(f1), str(f2), str(f3)]
+    )
+
+    # Union preserving first-seen order; whitespace stripped; blanks skipped
+    assert result["values"] == ["Motor", "Property", "Liability", "Marine"]
+    assert result["count"] == 4
+    assert result["file_count"] == 3
+
+
+def test_extract_input_sunrise_goc_names_missing_sheet(tmp_path: Path) -> None:
+    bad = tmp_path / "wrong.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.title = "OtherSheet"
+    wb.save(bad)
+
+    with pytest.raises(KeyError, match="Input_Sunrise"):
+        extract_input_sunrise_goc_names([str(bad)])
+
+
 def test_extract_unique_goc_names_custom_column_and_start_row(tmp_path: Path) -> None:
     fixture = tmp_path / "custom.xlsx"
     wb = openpyxl.Workbook()
@@ -122,11 +167,15 @@ def test_extract_unique_goc_names_custom_column_and_start_row(tmp_path: Path) ->
     assert result["values"] == ["A", "B"]
 
 
-def test_create_mp_lob(tmp_path: Path) -> None:
+def test_create_mp_lob_single_entity(tmp_path: Path) -> None:
     output = tmp_path / "MP_LoB.csv"
     goc_names = ["Motor", "Property", "Liability"]
 
-    result = create_mp_lob(goc_names=goc_names, entity_id=6, output_path=str(output))
+    result = create_mp_lob(
+        goc_names=goc_names,
+        entities=[(6, "AAI")],
+        output_path=str(output),
+    )
 
     assert result == {
         "output_path": str(output),
@@ -144,6 +193,29 @@ def test_create_mp_lob(tmp_path: Path) -> None:
     ]
 
 
+def test_create_mp_lob_multi_entity_cartesian(tmp_path: Path) -> None:
+    output = tmp_path / "MP_LoB.csv"
+    goc_names = ["Motor", "Property"]
+
+    result = create_mp_lob(
+        goc_names=goc_names,
+        entities=[(6, "AAI"), (14, "MPS")],
+        output_path=str(output),
+    )
+
+    assert result["rows"] == 4  # 2 GoCs * 2 entities
+
+    rows = _read_csv(output)
+    # Order: GoC outer, entity inner
+    assert rows == [
+        ("GoC_ID", "Entity_ID"),
+        ("Motor", 6),
+        ("Motor", 14),
+        ("Property", 6),
+        ("Property", 14),
+    ]
+
+
 def test_create_mp_lob_end_to_end(tmp_path: Path) -> None:
     ceded = tmp_path / "1.1_2025.12.31_AAI_P&C_Ceded.xlsx"
     _build_ceded_fixture(ceded)
@@ -152,7 +224,7 @@ def test_create_mp_lob_end_to_end(tmp_path: Path) -> None:
     extracted = extract_unique_goc_names(str(ceded))
     create_mp_lob(
         goc_names=extracted["values"],
-        entity_id=14,
+        entities=[(14, "MPS")],
         output_path=str(output),
     )
 

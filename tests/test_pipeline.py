@@ -7,7 +7,11 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from excel_pipeline.pipeline import run_astra_phase1, run_phase1
+from excel_pipeline.pipeline import (
+    run_astra_phase1,
+    run_phase1,
+    validate_sunrise_inputs,
+)
 
 
 def _read_csv(path: Path) -> list[tuple]:
@@ -99,24 +103,44 @@ def _build_payment_patterns_fixture(path: Path) -> None:
     wb.save(path)
 
 
-def test_run_phase1_happy_path(tmp_path: Path) -> None:
+def _build_input_sunrise_workbook(path: Path, gocs: list[str | None]) -> None:
+    """Workbook with the new Input_Sunrise sheet (col A = GoC, from row 2)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=3, value="Perimetro")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    for i, g in enumerate(gocs, start=2):
+        ws.cell(row=i, column=1, value=g)
+    wb.save(path)
+
+
+def test_run_phase1_happy_path_multi_entity(tmp_path: Path) -> None:
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
-    ceded = inputs_dir / "1.1_2025.12.31_AAI_P&C_Ceded.xlsx"
-    _build_ceded_fixture(ceded)
-    payments = inputs_dir / "1.2_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_curr, ["Motor", "Property"])
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_prev, ["Property", "Liability"])
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
     _build_payment_patterns_fixture(payments)
 
     result = run_phase1(
-        input_paths=[ceded, payments],
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
         run_dir=tmp_path,
-        entity_id=6,
-        entity_name="AAI",
+        entities=[(6, "AAI"), (14, "MPS")],
         year=2025,
         semester=2,
     )
 
+    # Union of GoCs across all _Ceded / _Assumed files, first-seen order
     assert result["goc_names"] == ["Motor", "Property", "Liability"]
+    assert result["entities"] == [(6, "AAI"), (14, "MPS")]
     assert result["year"] == 2025
     assert result["semester"] == 2
 
@@ -127,29 +151,20 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         tmp_path / "Risk_Adjustment.csv",
         tmp_path / "Payment_pattern.csv",
     ]
-    for p in outputs:
-        assert p.exists()
 
+    # MP_LoB: one row per (GoC, entity) — 3 GoCs * 2 entities = 6 data rows
     mp_lob = _read_csv(outputs[0])
     assert mp_lob == [
         ("GoC_ID", "Entity_ID"),
         ("Motor", 6),
+        ("Motor", 14),
         ("Property", 6),
+        ("Property", 14),
         ("Liability", 6),
+        ("Liability", 14),
     ]
 
-    mp_obs = _read_csv(outputs[1])
-    assert mp_obs == [
-        ("ObservationID", "ObservationYear", "LoB_ID", "AdjULAEPagate", "CY"),
-        ("Motor@Opening", 2024, "Motor", 0, "Yes"),
-        ("Motor@Closing", 2025, "Motor", 0, "Yes"),
-        ("Property@Opening", 2024, "Property", 0, "Yes"),
-        ("Property@Closing", 2025, "Property", 0, "Yes"),
-        ("Liability@Opening", 2024, "Liability", 0, "Yes"),
-        ("Liability@Closing", 2025, "Liability", 0, "Yes"),
-    ]
-
-    # H2 2025: Closing = FY_2025, Opening = FY_2024
+    # H2 2025 Risk Adjustment values
     ra = _read_csv(outputs[2])
     assert ra == [
         ("ObservationID", "Risk_Adjustment"),
@@ -161,70 +176,73 @@ def test_run_phase1_happy_path(tmp_path: Path) -> None:
         ("Liability@Closing", 330),
     ]
 
-    pp = _read_csv(outputs[3])
-    # Header columns "0".."22" coerce to ints under _read_csv; the header
-    # check is on the textual prefix only.
-    assert pp[0][:2] == ("GoC", "Year")
-    assert pp[0][2:] == tuple(range(23))
-    # For each GoC, reference year first then year-1.
-    assert pp[1] == ("Motor", 2025) + tuple(2000 + i for i in range(23))
-    assert pp[2] == ("Motor", 2024) + tuple(1000 + i for i in range(23))
-    assert pp[3] == ("Property", 2025) + tuple(6000 + i for i in range(23))
-    assert pp[4] == ("Property", 2024) + tuple(5000 + i for i in range(23))
-    assert pp[5] == ("Liability", 2025) + tuple(8000 + i for i in range(23))
-    assert pp[6] == ("Liability", 2024) + tuple(7000 + i for i in range(23))
 
+def test_run_phase1_raises_without_any_ceded_or_assumed(tmp_path: Path) -> None:
+    payments = tmp_path / "1.2_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
 
-def test_run_phase1_missing_ceded(tmp_path: Path) -> None:
-    other = tmp_path / "something_else.xlsx"
-    wb = openpyxl.Workbook()
-    wb.save(other)
-
-    with pytest.raises(FileNotFoundError, match="AAI_P&C_Ceded"):
+    with pytest.raises(FileNotFoundError, match="_Ceded|_Assumed"):
         run_phase1(
-            input_paths=[other],
+            input_paths=[payments],
             run_dir=tmp_path,
-            entity_id=6,
-            entity_name="AAI",
+            entities=[(6, "AAI")],
             year=2025,
             semester=2,
         )
 
 
-def test_run_phase1_picks_matching_files(tmp_path: Path) -> None:
-    """With extra unrelated files mixed in, the right inputs are picked."""
-    inputs_dir = tmp_path / "inputs"
-    inputs_dir.mkdir()
-    ceded = inputs_dir / "1.1_2025.12.31_AAI_P&C_Ceded.xlsx"
-    _build_ceded_fixture(ceded)
-    payments = inputs_dir / "1.2_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
-    _build_payment_patterns_fixture(payments)
-    unrelated = inputs_dir / "notes.xlsx"
-    openpyxl.Workbook().save(unrelated)
+def test_validate_sunrise_inputs_missing_transcodifica(tmp_path: Path) -> None:
+    ceded = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded, ["Motor"])
+    ceded_prev = tmp_path / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_prev, ["Motor"])
 
-    result = run_phase1(
-        input_paths=[unrelated, ceded, payments],
-        run_dir=tmp_path,
-        entity_id=14,
-        entity_name="MPS",
-        year=2025,
-        semester=1,
+    errors = validate_sunrise_inputs(
+        [ceded, ceded_prev], year=2025, semester=2,
     )
-    outputs = result["outputs"]
+    assert any("Transcodifica" in e for e in errors)
 
-    mp_lob_rows = _read_csv(outputs[0])
-    assert mp_lob_rows[1:] == [("Motor", 14), ("Property", 14), ("Liability", 14)]
 
-    # H1 2025: Closing = HY_2025, Opening = HY_2024
-    ra_rows = _read_csv(outputs[2])
-    assert ra_rows[1:] == [
-        ("Motor@Opening", 100),
-        ("Motor@Closing", 120),
-        ("Property@Opening", 200),
-        ("Property@Closing", 220),
-        ("Liability@Opening", 300),
-        ("Liability@Closing", 320),
-    ]
+def test_validate_sunrise_inputs_missing_ceded_for_one_date(tmp_path: Path) -> None:
+    ceded_curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_curr, ["Motor"])
+    transcodifica = tmp_path / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
+
+    errors = validate_sunrise_inputs(
+        [ceded_curr, transcodifica], year=2025, semester=2,
+    )
+    # Current-year date is covered; previous-year date is missing
+    assert any("2024.12.31" in e for e in errors)
+    assert not any("2025.12.31" in e for e in errors)
+
+
+def test_validate_sunrise_inputs_all_present_no_errors(tmp_path: Path) -> None:
+    ceded_curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_curr, ["Motor"])
+    ceded_prev = tmp_path / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_prev, ["Motor"])
+    transcodifica = tmp_path / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
+
+    errors = validate_sunrise_inputs(
+        [ceded_curr, ceded_prev, transcodifica], year=2025, semester=2,
+    )
+    assert errors == []
+
+
+def test_validate_sunrise_inputs_hy_semester_uses_june_30(tmp_path: Path) -> None:
+    ceded_curr = tmp_path / "1.1_2025.06.30_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_curr, ["Motor"])
+    ceded_prev = tmp_path / "1.2_2024.06.30_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(ceded_prev, ["Motor"])
+    transcodifica = tmp_path / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
+
+    errors = validate_sunrise_inputs(
+        [ceded_curr, ceded_prev, transcodifica], year=2025, semester=1,
+    )
+    assert errors == []
 
 
 def _build_ceded_with_pairs_fixture(

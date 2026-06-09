@@ -145,6 +145,55 @@ def extract_unique_goc_names(
     }
 
 
+def extract_input_sunrise_goc_names(
+    paths: list[str],
+    sheet: str = "Input_Sunrise",
+    column: str = "A",
+    start_row: int = 2,
+) -> dict[str, Any]:
+    """Union of unique GoC names from the ``Input_Sunrise`` sheet of many files.
+
+    Designed for the new Sunrise input model: the user uploads multiple
+    files whose names carry the suffix ``_Ceded`` or ``_Assumed``, each
+    with a sheet ``Input_Sunrise`` whose first column lists the GoCs.
+    This function opens every supplied file, reads column ``A`` from
+    ``start_row`` onward, and returns the union of unique values
+    preserving first-seen order across all files.
+
+    Whitespace is stripped; empty cells and rows whose GoC value is
+    blank are skipped. Opens with ``data_only=True`` so formula cells
+    return their cached computed value.
+    """
+    col_idx = column_index_from_string(column)
+    seen_set: set[str] = set()
+    seen: list[str] = []
+    for path in paths:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        if sheet not in wb.sheetnames:
+            raise KeyError(
+                f"Sheet '{sheet}' not found in '{path}'. "
+                f"Available sheets: {wb.sheetnames}"
+            )
+        ws = wb[sheet]
+        for r in range(start_row, ws.max_row + 1):
+            v = ws.cell(row=r, column=col_idx).value
+            if v is None:
+                continue
+            s = str(v).strip()
+            if not s:
+                continue
+            if s not in seen_set:
+                seen_set.add(s)
+                seen.append(s)
+    return {
+        "sheet": sheet,
+        "column": column,
+        "count": len(seen),
+        "values": seen,
+        "file_count": len(paths),
+    }
+
+
 def extract_unique_goc_cohort_pairs(
     path: str,
     sheet: str = "AAI_P&C_Ceded_H_NH",
@@ -194,24 +243,29 @@ def extract_unique_goc_cohort_pairs(
 
 def create_mp_lob(
     goc_names: list[str],
-    entity_id: int,
+    entities: list[tuple[int, str]],
     output_path: str,
 ) -> dict[str, Any]:
     """Create an ``MP_LoB`` CSV with two columns: ``GoC_ID`` and ``Entity_ID``.
 
-    ``GoC_ID`` is filled with the supplied unique GoC names (typically the
-    ``values`` result of ``extract_unique_goc_names``). ``Entity_ID`` is the
-    selected entity code, repeated on every data row. Overwrites the
-    output file if it already exists.
+    ``entities`` is a list of ``(entity_id, entity_name)`` tuples — the user
+    may select multiple entities. The output has one row per
+    ``(goc, entity)`` pair, iterating GoCs outer and entities inner:
+
+    ``GoC_1, Entity_A`` / ``GoC_1, Entity_B`` / ``GoC_2, Entity_A`` ...
+
+    ``GoC_ID`` carries the GoC name, ``Entity_ID`` carries the entity
+    integer code. Overwrites the output file if it already exists.
     """
     headers = ["GoC_ID", "Entity_ID"]
     rows: list[list[Any]] = [headers]
     for name in goc_names:
-        rows.append([name, entity_id])
+        for entity_id, _entity_name in entities:
+            rows.append([name, entity_id])
     _write_csv_rows(output_path, rows)
     return {
         "output_path": output_path,
-        "rows": len(goc_names),
+        "rows": len(goc_names) * len(entities),
         "columns": headers,
     }
 
