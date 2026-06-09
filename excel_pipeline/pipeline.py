@@ -147,37 +147,28 @@ def run_phase1(
     year: int,
     semester: int,
 ) -> dict[str, Any]:
-    """Phase 1: Ceded/Assumed Input_Sunrise sheets + Payment_Patterns -> CSVs.
+    """Phase 1 — currently runs only the MP_ModelPoint step.
 
-    The Sunrise input model is:
-    - one or more files ending in ``_Ceded`` (and optionally ``_Assumed``),
-      each with a sheet ``Input_Sunrise`` whose first column lists the
-      GoCs. The function takes the union of unique GoC names across all
-      of them;
-    - the Payment_Patterns_&_Risk_Adjustments file, used to compute
-      ``Risk_Adjustment.csv`` and ``Payment_pattern.csv``.
+    The legacy MP_LoB / MP_ObservationYear / Risk_Adjustment /
+    Payment_pattern steps are temporarily skipped while we focus on the
+    MP_ModelPoint output. The matching skill functions remain available
+    in ``skill.py`` and can be re-enabled here at any time without other
+    changes.
 
-    Writes:
+    Inputs consumed:
+    - the union of ``_Ceded`` / ``_Assumed`` files (split internally by
+      analysis date: current-year vs previous-year), used to build
+      ``MP_ModelPoint.csv``;
+    - the ``Transcodifica_aggregazione_GOC_H_NH`` master list, used to
+      populate Aggregation1 / Aggregation2 on each MP_ModelPoint row.
 
-    - ``{run_dir}/MP_ModelPoint.csv`` — one row per ``(GoC, accident_year,
-      observation_year)`` across both the analysis-date and previous-
-      year files; pre-horizon years are folded into the oldest year of
-      the horizon; Aggregation1/2 come from the Transcodifica master
-      list;
-    - ``{run_dir}/MP_LoB.csv`` — one row per ``(GoC, entity)`` pair when
-      multiple entities are selected;
-    - ``{run_dir}/MP_ObservationYear.csv`` — two rows per GoC
-      (``@Opening`` with ``year-1`` and ``@Closing`` with ``year``);
-    - ``{run_dir}/Risk_Adjustment.csv`` — two rows per GoC with the
-      Opening/Closing Risk Adjustment values;
-    - ``{run_dir}/Payment_pattern.csv`` — 25 columns (``GoC``, ``Year``,
-      ``0`` .. ``22``), two rows per GoC (``year`` and ``year-1``).
+    The Payment_Patterns_&_Risk_Adjustments workbook may still be
+    uploaded but is not read in this reduced flow.
 
     Returns a dict with:
-    - ``outputs``: the produced files in order;
-    - ``goc_names``: the unique GoC list;
-    - ``entities``: echoed for downstream consumers;
-    - ``year`` and ``semester``: echoed.
+    - ``outputs``: ``[MP_ModelPoint.csv]``;
+    - ``entities``, ``year``, ``semester``: echoed for downstream
+      consumers (e.g. the Astra page reads them from session state).
 
     Callers should run ``validate_sunrise_inputs`` first to surface a
     clear UI error when an expected file is missing.
@@ -192,13 +183,7 @@ def run_phase1(
             "No file with suffix '_Ceded' or '_Assumed' was provided. "
             f"Got: {[p.name for p in input_paths]}"
         )
-    goc_names = extract_input_sunrise_goc_names(
-        [str(p) for p in sunrise_paths]
-    )["values"]
 
-    # Split Ceded/Assumed inputs by analysis date so we can build the
-    # MP_ModelPoint output (the only Sunrise step that distinguishes
-    # the current-year file from the previous-year file).
     current_date, previous_date = _expected_sunrise_dates(year, semester)
     current_year_paths = [str(p) for p in sunrise_paths if current_date in p.name]
     previous_year_paths = [str(p) for p in sunrise_paths if previous_date in p.name]
@@ -213,55 +198,8 @@ def run_phase1(
         year=year,
     )
 
-    mp_lob_path = run_dir / "MP_LoB.csv"
-    create_mp_lob(
-        goc_names=goc_names,
-        entities=entities,
-        output_path=str(mp_lob_path),
-    )
-
-    mp_obs_path = run_dir / "MP_ObservationYear.csv"
-    create_mp_observation_year(
-        goc_names=goc_names,
-        year=year,
-        output_path=str(mp_obs_path),
-    )
-
-    pp_path = _find_file_by_suffix(input_paths, PAYMENT_PATTERNS_SUFFIX)
-    ra_values = lookup_risk_adjustment_values(
-        path=str(pp_path),
-        goc_names=goc_names,
-        year=year,
-        semester=semester,
-    )
-    ra_path = run_dir / "Risk_Adjustment.csv"
-    create_risk_adjustment(
-        goc_names=goc_names,
-        values=ra_values,
-        output_path=str(ra_path),
-    )
-
-    pp_rows = lookup_payment_pattern_values(
-        path=str(pp_path),
-        goc_names=goc_names,
-        year=year,
-        semester=semester,
-    )
-    payment_pattern_path = run_dir / "Payment_pattern.csv"
-    create_payment_pattern(
-        rows=pp_rows,
-        output_path=str(payment_pattern_path),
-    )
-
     return {
-        "outputs": [
-            mp_model_point_path,
-            mp_lob_path,
-            mp_obs_path,
-            ra_path,
-            payment_pattern_path,
-        ],
-        "goc_names": goc_names,
+        "outputs": [mp_model_point_path],
         "entities": entities,
         "year": year,
         "semester": semester,
