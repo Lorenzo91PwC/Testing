@@ -892,7 +892,7 @@ def update_curve_id_param(
 
     - ``VARIABLE_NAME == 'CLOSING_CURVE_ID'`` -> ``closing_curve_name``
     - ``VARIABLE_NAME == 'OPENING_CURVE_ID'`` -> ``opening_curve_name``
-    - ``VARIABLE_NAME == 'CREDITED_RATE_CURVE_ID'`` -> ``GOC_ID`` (col A)
+    - ``VARIABLE_NAME == 'CREDITED_RATE_CURVE_ID'`` -> ``'CR_' + GOC_ID`` (col A)
 
     Rows whose VARIABLE_NAME is anything else are left untouched, so any
     other historical content in the file passes through unchanged.
@@ -918,7 +918,8 @@ def update_curve_id_param(
                 row[2] = opening_curve_name
                 rows_updated += 1
             elif key == "CREDITED_RATE_CURVE_ID":
-                row[2] = row[0]
+                col_a = row[0]
+                row[2] = f"CR_{col_a}" if col_a is not None else None
                 rows_updated += 1
         out_rows.append(row)
 

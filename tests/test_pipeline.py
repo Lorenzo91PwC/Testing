@@ -493,7 +493,7 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
         ("IT05PABPPLE2024", "OPENING_CURVE_ID", "carlo"),
-        ("IT05PABPPLE2024", "CREDITED_RATE_CURVE_ID", "IT05PABPPLE2024"),
+        ("IT05PABPPLE2024", "CREDITED_RATE_CURVE_ID", "CR_IT05PABPPLE2024"),
     ]
 
 
