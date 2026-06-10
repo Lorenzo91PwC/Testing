@@ -53,14 +53,6 @@ ENTITIES: list[tuple[int, str]] = [
     (19, "NOBIS"),
 ]
 
-ASTRA_DEFAULT_GOC_SEG_LIST: list[str] = [
-    "IT05RRIEEBB",
-    "IT05RRIHEBB",
-    "IT05RRIHMAF",
-    "IT05RRIHVIC",
-    "IT05RRIHAST",
-]
-
 ASTRA_DEFAULT_AOM_IMPACT_PAIRS: list[tuple[str, int]] = [
     ("DA_LIC_OP", 0),
     ("DA_LIC_INCLAIM_INCEXP", 0),
@@ -91,7 +83,8 @@ st.warning(
     "sheet) and the specific rates row to extract are still to be defined; "
     "the output is not produced yet.\n\n"
     "`MP_GOC_SEG.csv` is wired and rewrites `P&C` to `HLTH_PC` in "
-    "columns A and C for the GoCs in the Health perimeter list below. "
+    "columns A and C for the GoCs whose H-NH flag is `H` in the "
+    "Transcodifica file uploaded on the Sunrise page. "
     "`MP_GOC.csv` is wired and rewrites columns E, F, L, P based on "
     "year, semester and business type.",
     icon="🚧",
@@ -170,17 +163,8 @@ with col_open_curve:
         "VARIABLE_NAME == 'OPENING_CURVE_ID'.",
     )
 
-st.info(
-    "💡 **Health perimeter GoC** — five default codes are pre-loaded. "
-    "**Remove** a code by clicking the × on its chip. **Add** a new "
-    "code by typing it in the box and pressing Enter.",
-    icon="ℹ️",
-)
-goc_seg_list = st.multiselect(
-    "Health perimeter GoC",
-    options=ASTRA_DEFAULT_GOC_SEG_LIST,
-    default=ASTRA_DEFAULT_GOC_SEG_LIST,
-    accept_new_options=True,
+health_perimeter_gocs = list(
+    st.session_state.get("sunrise_health_perimeter_gocs") or []
 )
 
 st.info(
@@ -265,7 +249,7 @@ if run_clicked and uploaded and parsed_entities and sunrise_ready:
                 year=int(year),
                 semester=int(semester),
                 business_type=business_type,
-                health_perimeter_gocs=list(goc_seg_list),
+                health_perimeter_gocs=health_perimeter_gocs,
                 actuarial_aom_impact_pairs=aom_impact_pairs,
                 closing_curve_name=closing_curve_name.strip(),
                 opening_curve_name=opening_curve_name.strip(),

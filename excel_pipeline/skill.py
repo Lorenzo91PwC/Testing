@@ -268,12 +268,15 @@ def extract_unique_goc_cohort_pairs(
     return {"sheet": sheet, "count": len(pairs), "pairs": pairs}
 
 
-def _load_transcodifica_table(path: str) -> dict[str, tuple[Any, Any]]:
-    """Load the Transcodifica master list as ``{goc: (agg1, agg2)}``.
+def _read_transcodifica_rows(path: str) -> list[list[Any]]:
+    """Return the Transcodifica file as a list of raw rows (header included).
 
-    Supports CSV and XLSX inputs. The file is expected to have the GoC
-    code in column A, Aggregation1 in column B, Aggregation2 in column C,
-    and a header row that we skip.
+    Supports CSV (European convention, ``;``-separated) and XLSX inputs.
+    The expected schema is:
+    - column A: GoC code (key)
+    - column B: Aggregation1
+    - column C: Aggregation2
+    - column D: H-NH flag (``"H"`` for Health, ``"NH"`` for non-Health)
     """
     suffix = Path(path).suffix.lower()
     rows: list[list[Any]] = []
@@ -285,10 +288,18 @@ def _load_transcodifica_table(path: str) -> dict[str, tuple[Any, Any]]:
         wb = openpyxl.load_workbook(path, data_only=True)
         ws = wb.active
         for r in range(1, ws.max_row + 1):
-            rows.append([ws.cell(row=r, column=c).value for c in range(1, 4)])
+            rows.append([ws.cell(row=r, column=c).value for c in range(1, 5)])
+    return rows
 
+
+def _load_transcodifica_table(path: str) -> dict[str, tuple[Any, Any]]:
+    """Load the Transcodifica master list as ``{goc: (agg1, agg2)}``.
+
+    Only Aggregation1 and Aggregation2 are returned; the H-NH flag is
+    consumed by ``extract_health_perimeter_gocs``.
+    """
     table: dict[str, tuple[Any, Any]] = {}
-    for row in rows[1:]:  # skip header
+    for row in _read_transcodifica_rows(path)[1:]:  # skip header
         if not row or row[0] is None:
             continue
         key = str(row[0]).strip()
@@ -298,6 +309,30 @@ def _load_transcodifica_table(path: str) -> dict[str, tuple[Any, Any]]:
         agg2 = row[2] if len(row) > 2 else None
         table[key] = (agg1, agg2)
     return table
+
+
+def extract_health_perimeter_gocs(path: str) -> list[str]:
+    """Return the GoCs flagged as Health in the Transcodifica master list.
+
+    Reads the Transcodifica file (CSV or XLSX) and returns the GoCs
+    whose column D value, normalised to upper case and stripped, equals
+    ``"H"``. The list preserves the order in which the GoCs appear in
+    the file. Used by ``update_mp_goc_seg`` as the perimeter on which
+    ``P&C`` is rewritten to ``HLTH_PC``.
+    """
+    perimeter: list[str] = []
+    seen: set[str] = set()
+    for row in _read_transcodifica_rows(path)[1:]:  # skip header
+        if not row or row[0] is None:
+            continue
+        goc = str(row[0]).strip()
+        if not goc:
+            continue
+        flag = str(row[3]).strip().upper() if len(row) > 3 and row[3] is not None else ""
+        if flag == "H" and goc not in seen:
+            seen.add(goc)
+            perimeter.append(goc)
+    return perimeter
 
 
 def _iter_input_sunrise_rows(

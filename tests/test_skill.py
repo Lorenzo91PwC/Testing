@@ -20,6 +20,7 @@ from excel_pipeline.skill import (
     create_reinsurance,
     create_risk_adjustment,
     append_actuarial_aom_impact,
+    extract_health_perimeter_gocs,
     extract_input_sunrise_goc_names,
     extract_unique_goc_cohort_pairs,
     extract_unique_goc_names,
@@ -1305,12 +1306,52 @@ def _build_input_sunrise_rows_fixture(
 
 
 def _build_transcodifica_csv(path: Path, rows: list[tuple]) -> None:
-    """Build a Transcodifica CSV (``;`` separator, header + data rows)."""
+    """Build a Transcodifica CSV (``;`` separator, header + data rows).
+
+    Each row should be (GOC, Aggregation1, Aggregation2, H_NH).
+    Shorter tuples are padded with empty cells.
+    """
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
-        w.writerow(["GOC", "Aggregation1", "Aggregation2"])
+        w.writerow(["GOC", "Aggregation1", "Aggregation2", "H-NH"])
         for r in rows:
-            w.writerow(r)
+            padded = list(r) + [""] * (4 - len(r))
+            w.writerow(padded[:4])
+
+
+def test_extract_health_perimeter_gocs(tmp_path: Path) -> None:
+    fixture = tmp_path / "transcodifica.csv"
+    _build_transcodifica_csv(
+        fixture,
+        [
+            ("IT05PABPPLE", "Comm P&C", "PAA_Direct", "NH"),
+            ("IT05RRIEEBB", "Health line A", "PAA_Direct", "H"),
+            ("IT05RRIHEBB", "Health line B", "PAA_Direct", "h"),  # lower-case still counts
+            ("IT05PABLMIN", "Comm P&C", "PAA_Direct", "NH"),
+            ("IT05RRIHMAF", "Health line C", "PAA_Direct", "H"),
+            # blanks and duplicates
+            ("IT05RRIEEBB", "Health line A dup", "PAA_Direct", "H"),
+            ("", "ignored row", "", "H"),
+        ],
+    )
+
+    result = extract_health_perimeter_gocs(str(fixture))
+
+    # Order preserved (first occurrence), duplicates dropped, NH excluded,
+    # blank GOC ignored, lower-case "h" matched.
+    assert result == ["IT05RRIEEBB", "IT05RRIHEBB", "IT05RRIHMAF"]
+
+
+def test_extract_health_perimeter_gocs_no_h(tmp_path: Path) -> None:
+    fixture = tmp_path / "transcodifica.csv"
+    _build_transcodifica_csv(
+        fixture,
+        [
+            ("IT05PABPPLE", "Comm P&C", "PAA_Direct", "NH"),
+            ("IT05PABLMIN", "Comm P&C", "PAA_Direct", "NH"),
+        ],
+    )
+    assert extract_health_perimeter_gocs(str(fixture)) == []
 
 
 def test_create_mp_model_point_happy_path(tmp_path: Path) -> None:

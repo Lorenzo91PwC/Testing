@@ -25,6 +25,7 @@ from .skill import (
     create_mp_model_point,
     create_mp_observation_year,
     create_new_business_ppos,
+    extract_health_perimeter_gocs,
     create_payment_pattern,
     create_reinsurance,
     create_risk_adjustment,
@@ -261,6 +262,9 @@ def run_phase1(
             payment_pattern_path,
         ],
         "goc_cohort_pairs": mp_result["goc_cohort_pairs"],
+        "health_perimeter_gocs": extract_health_perimeter_gocs(
+            str(transcodifica_path)
+        ),
         "entities": entities,
         "year": year,
         "semester": semester,

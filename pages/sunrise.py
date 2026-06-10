@@ -179,11 +179,17 @@ with col_main:
                     for out in phase1_result["outputs"]:
                         st.write(f"✅ Phase 1 → `{out.name}`")
 
-                    # Expose the (GoC, accident_year) pairs to the Astra
-                    # page via session_state so it no longer needs the
-                    # legacy AAI_P&C_Ceded upload to derive them.
+                    # Expose to the Astra page via session_state:
+                    # - (GoC, accident_year) pairs, replacing the legacy
+                    #   AAI_P&C_Ceded upload that used to derive them;
+                    # - the Health-perimeter GoCs read from the
+                    #   Transcodifica file (column D == 'H'), replacing
+                    #   the manual multiselect on the Astra page.
                     st.session_state.sunrise_goc_cohort_pairs = (
                         phase1_result["goc_cohort_pairs"]
+                    )
+                    st.session_state.sunrise_health_perimeter_gocs = (
+                        phase1_result["health_perimeter_gocs"]
                     )
 
                     status.update(label="Pipeline complete", state="complete")
