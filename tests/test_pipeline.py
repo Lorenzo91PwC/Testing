@@ -471,7 +471,7 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
     # E (idx 4), F (idx 5), L (idx 11), P (idx 15)
     assert by_cohort[2014][4] == "20141231_ITA_LP100"
     assert by_cohort[2024][4] == "20241231_EUR_LP100_FY24_AVG"
-    assert by_cohort[2014][11] == (2024 - 2014) * 12
+    assert by_cohort[2014][11] == max(0, 2024 - 1 - 2014) * 12
     assert by_cohort[2024][11] == 0
     for cohort in (2014, 2024):
         assert by_cohort[cohort][15] == "2_RE_ASSUMED"

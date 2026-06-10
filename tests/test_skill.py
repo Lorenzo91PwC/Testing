@@ -1243,9 +1243,10 @@ def test_update_mp_goc_h2_diretto(tmp_path: Path) -> None:
     for y in (2014, 2018, 2021, 2022, 2024):
         assert rows[y]["F"] == "ORIGINAL_F"
 
-    assert rows[2014]["L"] == (2025 - 2014) * 12
-    assert rows[2024]["L"] == 12
-    assert rows[2025]["L"] == 0
+    # New formula: max(0, year - 1 - cohort) * 12 -> with year=2025
+    assert rows[2014]["L"] == max(0, 2025 - 1 - 2014) * 12  # 120
+    assert rows[2024]["L"] == 0  # 2025 - 1 - 2024 = 0
+    assert rows[2025]["L"] == 0  # max(0, -1) * 12 = 0
 
     for y in _MP_GOC_COHORT_YEARS:
         assert rows[y]["P"] == "2_RE_ASSUMED"

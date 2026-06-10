@@ -1184,7 +1184,7 @@ def update_mp_goc(
     - **F (TIMING_INCEPTION_CURVE, idx 5)** — only when cohort_year == 2025:
       ``"7_JULY"`` for H1, ``"13_YEAR_END"`` for H2. Other rows keep the
       existing F value.
-    - **L (GOC_DURATION, idx 11)** — ``max(0, year - cohort_year) * 12``.
+    - **L (GOC_DURATION, idx 11)** — ``max(0, year - 1 - cohort_year) * 12``.
     - **P (GOC_TYPE_REINSURANCE, idx 15)** — ``"2_RE_ASSUMED"`` if
       ``business_type == "Diretto"``, ``"3_RE_CEDED_NON_RETRO"`` if
       ``"Ceduto"``.
@@ -1233,7 +1233,7 @@ def update_mp_goc(
         row[4] = _mp_goc_inception_curve_id(cohort_year, mmdd)
         if cohort_year == 2025:
             row[5] = f_value_for_2025
-        row[11] = max(0, year - cohort_year) * 12
+        row[11] = max(0, year - 1 - cohort_year) * 12
         row[15] = p_value
         rows_changed += 1
         out_rows.append(row)
