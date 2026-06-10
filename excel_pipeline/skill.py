@@ -1152,7 +1152,8 @@ MP_GOC_BUSINESS_TYPE_VALUES = {
 
 def _mp_goc_inception_curve_id(cohort_year: int, mmdd: str) -> str:
     if cohort_year <= 2015:
-        return f"{cohort_year}{mmdd}_ITA_LP100"
+        # Fixed value, independent of cohort year and semester.
+        return "20211231_ITA_LP100_AVG"
     if cohort_year <= 2021:
         return f"{cohort_year}{mmdd}_ITA_LP100_AVG"
     if cohort_year == 2022:
@@ -1176,7 +1177,7 @@ def update_mp_goc(
 
     - **E (INCEPTION_CURVE_ID, idx 4)** — year-bucketed string, with
       MMDD = ``0630`` for ``semester == 1`` and ``1231`` for ``semester == 2``:
-        - cohort <= 2015: ``{cohort}{mmdd}_ITA_LP100``
+        - cohort <= 2015: ``"20211231_ITA_LP100_AVG"`` (fixed)
         - 2016 <= cohort <= 2021: ``{cohort}{mmdd}_ITA_LP100_AVG``
         - cohort == 2022: ``2022{mmdd}_ITA_LP100_FY22_AVG``
         - cohort >= 2023: ``{cohort}{mmdd}_EUR_LP100_FY{yy}_AVG``
@@ -1184,7 +1185,10 @@ def update_mp_goc(
     - **F (TIMING_INCEPTION_CURVE, idx 5)** — only when cohort_year == 2025:
       ``"7_JULY"`` for H1, ``"13_YEAR_END"`` for H2. Other rows keep the
       existing F value.
-    - **L (GOC_DURATION, idx 11)** — ``max(0, year - 1 - cohort_year) * 12``.
+    - **L (GOC_DURATION, idx 11)** — ``max(0, year - 1 - curve_year) * 12``
+      where ``curve_year`` is the integer parsed from the first 4 chars
+      of the column E value just written. Equals the cohort year for
+      cohorts >= 2016 and is pinned to 2021 for cohorts <= 2015.
     - **P (GOC_TYPE_REINSURANCE, idx 15)** — ``"2_RE_ASSUMED"`` if
       ``business_type == "Diretto"``, ``"3_RE_CEDED_NON_RETRO"`` if
       ``"Ceduto"``.
@@ -1233,7 +1237,15 @@ def update_mp_goc(
         row[4] = _mp_goc_inception_curve_id(cohort_year, mmdd)
         if cohort_year == 2025:
             row[5] = f_value_for_2025
-        row[11] = max(0, year - 1 - cohort_year) * 12
+        # GOC_DURATION (col L) uses the year embedded at the head of the
+        # column E value, not the cohort_year directly. This makes the
+        # duration follow the curve's effective year — relevant for the
+        # cohort <= 2015 case where column E is pinned to "2021...".
+        try:
+            curve_year = int(str(row[4])[:4])
+        except (TypeError, ValueError):
+            curve_year = cohort_year
+        row[11] = max(0, year - 1 - curve_year) * 12
         row[15] = p_value
         rows_changed += 1
         out_rows.append(row)

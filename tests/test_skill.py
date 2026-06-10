@@ -1232,7 +1232,8 @@ def test_update_mp_goc_h2_diretto(tmp_path: Path) -> None:
     assert result["rows_changed"] == len(_MP_GOC_COHORT_YEARS)
 
     rows = _read_mp_goc(output)
-    assert rows[2014]["E"] == "20141231_ITA_LP100"
+    # cohort <= 2015 -> fixed value, independent of semester
+    assert rows[2014]["E"] == "20211231_ITA_LP100_AVG"
     assert rows[2018]["E"] == "20181231_ITA_LP100_AVG"
     assert rows[2021]["E"] == "20211231_ITA_LP100_AVG"
     assert rows[2022]["E"] == "20221231_ITA_LP100_FY22_AVG"
@@ -1243,8 +1244,10 @@ def test_update_mp_goc_h2_diretto(tmp_path: Path) -> None:
     for y in (2014, 2018, 2021, 2022, 2024):
         assert rows[y]["F"] == "ORIGINAL_F"
 
-    # New formula: max(0, year - 1 - cohort) * 12 -> with year=2025
-    assert rows[2014]["L"] == max(0, 2025 - 1 - 2014) * 12  # 120
+    # L = max(0, year - 1 - curve_year) * 12 where curve_year is parsed
+    # from the first 4 chars of column E. cohort 2014 -> col E starts
+    # with "2021" -> curve_year = 2021, so L = (2025-1-2021)*12 = 36.
+    assert rows[2014]["L"] == 36
     assert rows[2024]["L"] == 0  # 2025 - 1 - 2024 = 0
     assert rows[2025]["L"] == 0  # max(0, -1) * 12 = 0
 
@@ -1265,7 +1268,8 @@ def test_update_mp_goc_h1_ceduto(tmp_path: Path) -> None:
         business_type="Ceduto",
     )
     rows = _read_mp_goc(output)
-    assert rows[2014]["E"] == "20140630_ITA_LP100"
+    # cohort <= 2015 -> fixed value, semester does not affect it
+    assert rows[2014]["E"] == "20211231_ITA_LP100_AVG"
     assert rows[2022]["E"] == "20220630_ITA_LP100_FY22_AVG"
     assert rows[2025]["E"] == "20250630_EUR_LP100_FY25_AVG"
     assert rows[2025]["F"] == "7_JULY"
