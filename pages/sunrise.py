@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import streamlit as st
 
 from excel_pipeline.pipeline import run_phase1, validate_sunrise_inputs
 from excel_pipeline.skill import list_run_files
+from excel_pipeline.user_prefs import load_pref, save_pref
 
 _ENTITY_FREEFORM_RE = re.compile(r"^\s*(\d+)\s*-\s*(.+?)\s*$")
 
@@ -212,6 +214,36 @@ with col_main:
                 mime=CSV_MIME,
                 key=str(f),
             )
+
+        st.subheader("4. Save all outputs to folder")
+        saved_folder = load_pref("sunrise_output_folder", "")
+        output_folder = st.text_input(
+            "Output folder path (remembered between sessions)",
+            value=saved_folder,
+            placeholder=r"e.g. C:\Users\loren\Sunrise_outputs",
+            key="sunrise_output_folder_input",
+        )
+        if output_folder != saved_folder:
+            save_pref("sunrise_output_folder", output_folder)
+
+        save_all = st.button(
+            "📥 Save all Sunrise outputs to that folder",
+            disabled=not (output_folder and files),
+            key="sunrise_save_all",
+        )
+        if save_all and output_folder and files:
+            try:
+                dest = Path(output_folder).expanduser()
+                dest.mkdir(parents=True, exist_ok=True)
+                copied: list[str] = []
+                for f in files:
+                    shutil.copy2(f, dest / f.name)
+                    copied.append(f.name)
+                st.success(
+                    f"✅ Saved {len(copied)} file(s) to `{dest}`."
+                )
+            except Exception as e:  # noqa: BLE001
+                st.error(f"❌ Failed to save outputs: {e}")
 
 with col_chat:
     st.subheader("💬 Ad-hoc edits")
