@@ -413,8 +413,7 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
         tmp_path / "MP_GOC.csv",
         tmp_path / "ACTUARIAL_AOM_IMPACT.csv",
         tmp_path / "CURVE_ID_PARAM.csv",
-        tmp_path / "OCI_OPTION_CF_CLOSING.csv",
-        tmp_path / "OCI_OPTION_CF_OPENING.csv",
+        # OCI placeholders disabled (TODO: define population rules)
     ]
     for p in outputs:
         assert p.exists()

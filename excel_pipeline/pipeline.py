@@ -320,8 +320,10 @@ def run_astra_phase1(
       filled per VARIABLE_NAME: ``CLOSING_CURVE_ID`` ->
       ``closing_curve_name``, ``OPENING_CURVE_ID`` ->
       ``opening_curve_name``, ``CREDITED_RATE_CURVE_ID`` -> column A.
-    - ``{run_dir}/OCI_OPTION_CF_CLOSING.csv`` — empty placeholder.
-    - ``{run_dir}/OCI_OPTION_CF_OPENING.csv`` — empty placeholder.
+    - ``OCI_OPTION_CF_CLOSING.csv`` and ``OCI_OPTION_CF_OPENING.csv``
+      are currently **not emitted** — their population rules are still
+      TODO. The disabled call sites are commented in the pipeline body
+      and can be re-enabled in two edits when the spec lands.
 
     ``goc_cohort_pairs`` is the list of ``{"goc_id", "goc", "year"}``
     dicts produced by the Sunrise run (typically read from session
@@ -400,10 +402,13 @@ def run_astra_phase1(
         opening_curve_name=opening_curve_name,
     )
 
-    closing_path = run_dir / "OCI_OPTION_CF_CLOSING.csv"
-    opening_path = run_dir / "OCI_OPTION_CF_OPENING.csv"
-    create_empty_csv(str(closing_path))
-    create_empty_csv(str(opening_path))
+    # OCI placeholders disabled until the population rules are defined.
+    # Re-enable by uncommenting the four lines below and adding
+    # `closing_path` / `opening_path` back to the return list.
+    # closing_path = run_dir / "OCI_OPTION_CF_CLOSING.csv"
+    # opening_path = run_dir / "OCI_OPTION_CF_OPENING.csv"
+    # create_empty_csv(str(closing_path))
+    # create_empty_csv(str(opening_path))
 
     return [
         new_business_path,
@@ -415,6 +420,6 @@ def run_astra_phase1(
         mp_goc_path,
         aom_impact_path,
         curve_id_param_path,
-        closing_path,
-        opening_path,
+        # closing_path,
+        # opening_path,
     ]
