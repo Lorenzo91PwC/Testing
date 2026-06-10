@@ -789,7 +789,7 @@ def test_update_projection_parameters_entity_h2_2025(tmp_path: Path) -> None:
     rows = _read_csv(output)
     by_param = {row[0]: row[1] for row in rows[1:]}
     # Edits applied
-    assert by_param["CF_TIMESTEP"] == "YEARLY"
+    assert by_param["CF_TIMESTEP"] == "SEMESTRIAL"
     assert by_param["REPORTING_MONTH"] == "12_DECEMBER"
     assert by_param["FX_OPENING_DATE"] == "1M25"
     assert by_param["FX_AVERAGE_DATE"] == "HY25"
@@ -825,7 +825,7 @@ def test_update_projection_parameters_entity_h1_2025(tmp_path: Path) -> None:
     assert by_param["FX_CLOSING_DATE"] == "HY25"
     assert by_param["FX_REPORTING_DATE"] == 20250630
     assert by_param["FX_OPENING_DATE"] == "1M25"
-    assert by_param["CF_TIMESTEP"] == "YEARLY"
+    assert by_param["CF_TIMESTEP"] == "SEMESTRIAL"
 
 
 def test_update_projection_parameters_entity_drops_extra_columns(tmp_path: Path) -> None:
@@ -850,7 +850,7 @@ def test_update_projection_parameters_entity_drops_extra_columns(tmp_path: Path)
     rows = _read_csv(output)
     assert all(len(r) == 2 for r in rows)
     assert rows[0] == ("PARAMETER", "VALUE")
-    assert rows[1] == ("CF_TIMESTEP", "YEARLY")
+    assert rows[1] == ("CF_TIMESTEP", "SEMESTRIAL")
 
 
 def test_update_projection_parameters_entity_invalid_semester(tmp_path: Path) -> None:

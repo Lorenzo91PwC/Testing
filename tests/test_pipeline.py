@@ -452,7 +452,7 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
 
     pp_rows = _read_csv(outputs[4])
     by_param = {row[0]: row[1] for row in pp_rows[1:]}
-    assert by_param["CF_TIMESTEP"] == "YEARLY"
+    assert by_param["CF_TIMESTEP"] == "SEMESTRIAL"
     assert by_param["REPORTING_MONTH"] == "12_DECEMBER"
     assert by_param["FX_OPENING_DATE"] == "1M24"
     assert by_param["FX_AVERAGE_DATE"] == "HY24"

@@ -1066,7 +1066,7 @@ def update_projection_parameters_entity(
 
     Edits applied (parameter -> new value):
 
-    - ``CF_TIMESTEP`` -> ``'YEARLY'``
+    - ``CF_TIMESTEP`` -> ``'SEMESTRIAL'``
     - ``REPORTING_MONTH`` -> ``'{month_num}_{MONTH_NAME}'``
       (``6_JUNE`` for H1, ``12_DECEMBER`` for H2)
     - ``FX_OPENING_DATE`` -> ``'1M{year_2d}'`` (e.g. ``1M25``)
@@ -1094,7 +1094,7 @@ def update_projection_parameters_entity(
     year_2d = f"{year % 100:02d}"
 
     updates: dict[str, Any] = {
-        "CF_TIMESTEP": "YEARLY",
+        "CF_TIMESTEP": "SEMESTRIAL",
         "REPORTING_MONTH": f"{month_num}_{month_name}",
         "FX_OPENING_DATE": f"1M{year_2d}",
         "FX_AVERAGE_DATE": f"{avg_prefix}{year_2d}",
