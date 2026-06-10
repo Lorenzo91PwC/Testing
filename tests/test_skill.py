@@ -1200,11 +1200,22 @@ _MP_GOC_HEADERS = (
 _MP_GOC_COHORT_YEARS = (2014, 2018, 2021, 2022, 2024, 2025)
 
 
-def _build_mp_goc_fixture(path: Path, original_f: str = "ORIGINAL_F") -> None:
+def _build_mp_goc_fixture(
+    path: Path,
+    original_f: str = "ORIGINAL_F",
+    col_r_by_cohort: dict[int, str] | None = None,
+) -> None:
+    """Build an MP_GOC fixture. ``col_r_by_cohort`` lets a test set the
+    AGGREG_2_ID (column R, index 17) per cohort row so the column-P logic
+    can be exercised.
+    """
+    col_r_map = col_r_by_cohort or {}
     rows: list[tuple] = [_MP_GOC_HEADERS]
     for y in _MP_GOC_COHORT_YEARS:
         row = [f"IT{y}", "PAA", y, 20] + [None] * (len(_MP_GOC_HEADERS) - 4)
         row[5] = original_f
+        if y in col_r_map:
+            row[17] = col_r_map[y]
         rows.append(tuple(row))
     _write_csv(path, rows)
 
@@ -1213,7 +1224,7 @@ def _read_mp_goc(path: Path) -> dict[int, dict]:
     rows = _read_csv(path)
     out: dict[int, dict] = {}
     for r in rows[1:]:
-        out[r[2]] = {"E": r[4], "F": r[5], "L": r[11], "P": r[15]}
+        out[r[2]] = {"E": r[4], "F": r[5], "L": r[11], "P": r[15], "R": r[17]}
     return out
 
 
@@ -1251,11 +1262,47 @@ def test_update_mp_goc_h2_diretto(tmp_path: Path) -> None:
     assert rows[2024]["L"] == 0  # 2025 - 1 - 2024 = 0
     assert rows[2025]["L"] == 0  # max(0, -1) * 12 = 0
 
+    # Col R is empty in this fixture -> col P falls back to 2_RE_ASSUMED
     for y in _MP_GOC_COHORT_YEARS:
         assert rows[y]["P"] == "2_RE_ASSUMED"
 
 
-def test_update_mp_goc_h1_ceduto(tmp_path: Path) -> None:
+def test_update_mp_goc_col_p_driven_by_col_r(tmp_path: Path) -> None:
+    """Col P now reads col R (AGGREG_2_ID), not business_type."""
+    fixture = tmp_path / "MP_GOC.csv"
+    output = tmp_path / "out.csv"
+    _build_mp_goc_fixture(
+        fixture,
+        col_r_by_cohort={
+            2014: "PAA_Ceded",          # ceded
+            2018: "PAA_Direct",         # other -> assumed
+            2021: "PAA_Ceded",          # ceded
+            2022: "",                   # blank -> assumed
+            2024: "  PAA_Ceded  ",      # whitespace-trimmed match -> ceded
+            2025: "SomethingElse",      # other -> assumed
+        },
+    )
+
+    # business_type is irrelevant for col P now — pass any valid value.
+    update_mp_goc(
+        input_path=str(fixture),
+        output_path=str(output),
+        year=2025,
+        semester=2,
+        business_type="Diretto",
+    )
+
+    rows = _read_mp_goc(output)
+    assert rows[2014]["P"] == "3_RE_CEDED_NON_RETRO"
+    assert rows[2018]["P"] == "2_RE_ASSUMED"
+    assert rows[2021]["P"] == "3_RE_CEDED_NON_RETRO"
+    assert rows[2022]["P"] == "2_RE_ASSUMED"
+    assert rows[2024]["P"] == "3_RE_CEDED_NON_RETRO"
+    assert rows[2025]["P"] == "2_RE_ASSUMED"
+
+
+def test_update_mp_goc_h1_other_curve_dates(tmp_path: Path) -> None:
+    """Sanity check that semester=1 dates still flow through correctly."""
     fixture = tmp_path / "MP_GOC.csv"
     output = tmp_path / "out.csv"
     _build_mp_goc_fixture(fixture)
@@ -1274,8 +1321,10 @@ def test_update_mp_goc_h1_ceduto(tmp_path: Path) -> None:
     assert rows[2025]["E"] == "20250630_EUR_LP100_FY25_AVG"
     assert rows[2025]["F"] == "7_JULY"
     assert rows[2024]["F"] == "ORIGINAL_F"
+    # With no col R set, every row still defaults to 2_RE_ASSUMED
+    # regardless of business_type.
     for y in _MP_GOC_COHORT_YEARS:
-        assert rows[y]["P"] == "3_RE_CEDED_NON_RETRO"
+        assert rows[y]["P"] == "2_RE_ASSUMED"
 
 
 def test_update_mp_goc_idempotent(tmp_path: Path) -> None:

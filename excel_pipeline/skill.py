@@ -1189,9 +1189,14 @@ def update_mp_goc(
       where ``curve_year`` is the integer parsed from the first 4 chars
       of the column E value just written. Equals the cohort year for
       cohorts >= 2016 and is pinned to 2021 for cohorts <= 2015.
-    - **P (GOC_TYPE_REINSURANCE, idx 15)** — ``"2_RE_ASSUMED"`` if
-      ``business_type == "Diretto"``, ``"3_RE_CEDED_NON_RETRO"`` if
-      ``"Ceduto"``.
+    - **P (GOC_TYPE_REINSURANCE, idx 15)** — derived from column R
+      (AGGREG_2_ID) on the same row: ``"3_RE_CEDED_NON_RETRO"`` when
+      column R equals ``"PAA_Ceded"`` (whitespace-trimmed),
+      ``"2_RE_ASSUMED"`` otherwise (including missing / blank cells).
+
+    ``business_type`` is validated for backward compatibility with the
+    Astra UI form but no longer drives any output — column P now
+    depends only on column R.
 
     ``semester`` follows the pipeline convention (1 = H1 / June, 2 = H2 /
     December). Idempotent: rerunning with the same inputs produces the
@@ -1210,7 +1215,9 @@ def update_mp_goc(
         f_value_for_2025 = "13_YEAR_END"
     else:
         raise ValueError(f"semester must be 1 or 2, got {semester}")
-    p_value = MP_GOC_BUSINESS_TYPE_VALUES[business_type]
+    # business_type is validated for backward-compat with the existing
+    # UI form but no longer drives column P; the value is now derived
+    # from column R (AGGREG_2_ID) of each row.
 
     table = _read_csv_table(input_path)
     if not table:
@@ -1221,7 +1228,8 @@ def update_mp_goc(
     rows_changed = 0
     for raw in table[1:]:
         row = list(raw)
-        while len(row) < 16:
+        # Need to access column R (index 17). Pad missing trailing cells.
+        while len(row) < 18:
             row.append(None)
 
         cohort_raw = row[2]
@@ -1246,7 +1254,15 @@ def update_mp_goc(
         except (TypeError, ValueError):
             curve_year = cohort_year
         row[11] = max(0, year - 1 - curve_year) * 12
-        row[15] = p_value
+        # GOC_TYPE_REINSURANCE (col P) is driven by the value of column R
+        # (AGGREG_2_ID) on the same row: "PAA_Ceded" -> ceded, anything
+        # else (including missing / different cells) -> assumed.
+        col_r = row[17]
+        col_r_str = col_r.strip() if isinstance(col_r, str) else ""
+        if col_r_str == "PAA_Ceded":
+            row[15] = "3_RE_CEDED_NON_RETRO"
+        else:
+            row[15] = "2_RE_ASSUMED"
         rows_changed += 1
         out_rows.append(row)
 
