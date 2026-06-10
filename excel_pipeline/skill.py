@@ -948,9 +948,14 @@ def update_mp_goc_seg(
         return {"output_path": output_path, "rows_in_perimeter": 0}
 
     rows_changed = 0
-    out_rows: list[list[Any]] = [table[0]]
+    out_rows: list[list[Any]] = [list(table[0])[:4]]
+    # MP_GOC_SEG is contractually four columns. Pad short rows with None
+    # and truncate any trailing cells (which would otherwise surface in
+    # the output as empty trailing fields like ``1;;;``).
+    while len(out_rows[0]) < 4:
+        out_rows[0].append(None)
     for raw in table[1:]:
-        row = list(raw)
+        row = list(raw)[:4]
         while len(row) < 4:
             row.append(None)
 

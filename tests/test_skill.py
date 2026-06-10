@@ -948,6 +948,34 @@ def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
     assert rows[3] == ("Y_02_P&C", None, "02_P&C", 1)
 
 
+def test_update_mp_goc_seg_truncates_trailing_empty_columns(tmp_path: Path) -> None:
+    """Input rows with trailing empty cells must not surface as ``1;;;`` in output."""
+    fixture = tmp_path / "in.csv"
+    # Write the file manually so we can control extra trailing ';' fields.
+    with open(fixture, "w", newline="", encoding="utf-8-sig") as f:
+        f.write("GOC_SEG_ID;GOC_ID;SEG_ID;ALLOCATION_RATIO;;;\n")
+        f.write("IT05RRIEEBB2024_02_P&C;IT05RRIEEBB2024;02_P&C;1;;;\n")
+        f.write("IT05PABPPLE2024_02_P&C;IT05PABPPLE2024;02_P&C;1;;;\n")
+
+    output = tmp_path / "out.csv"
+    update_mp_goc_seg(
+        input_path=str(fixture),
+        output_path=str(output),
+        health_perimeter_gocs=["IT05RRIEEBB"],
+    )
+
+    # The raw bytes must end each line after the 4th field (no trailing ';').
+    text = output.read_text(encoding="utf-8-sig")
+    for line in text.splitlines():
+        assert line.count(";") == 3, f"expected 3 separators, got {line!r}"
+
+    # And the parsed rows must still have exactly 4 cells.
+    rows = _read_csv(output)
+    assert all(len(r) == 4 for r in rows)
+    assert rows[1] == ("IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1)
+    assert rows[2] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
+
+
 def _build_aom_impact_fixture(path: Path, rows: list[tuple]) -> None:
     """rows: list of (goc_id, step_id, value). Header is added."""
     out: list[tuple] = [("GOC_ID", "STEP_ID", 1)]
