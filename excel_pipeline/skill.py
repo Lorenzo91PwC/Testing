@@ -271,8 +271,12 @@ def extract_unique_goc_cohort_pairs(
 def _read_transcodifica_rows(path: str) -> list[list[Any]]:
     """Return the Transcodifica file as a list of raw rows (header included).
 
-    Supports CSV (European convention, ``;``-separated) and XLSX inputs.
-    The expected schema is:
+    Supports both CSV and XLSX. For CSV the field separator is auto-
+    detected among ``;``, ``,`` and ``\\t`` by sniffing the first part
+    of the file (falling back to ``;`` if Sniffer can not decide), so a
+    Transcodifica exported as comma- or tab-delimited from Excel is
+    handled correctly. The expected schema is:
+
     - column A: GoC code (key)
     - column B: Aggregation1
     - column C: Aggregation2
@@ -282,7 +286,14 @@ def _read_transcodifica_rows(path: str) -> list[list[Any]]:
     rows: list[list[Any]] = []
     if suffix == ".csv":
         with open(path, newline="", encoding="utf-8-sig") as f:
-            for raw in csv.reader(f, delimiter=";"):
+            sample = f.read(4096)
+            f.seek(0)
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
+                delim = dialect.delimiter
+            except csv.Error:
+                delim = ";"
+            for raw in csv.reader(f, delimiter=delim):
                 rows.append(list(raw))
     else:
         wb = openpyxl.load_workbook(path, data_only=True)

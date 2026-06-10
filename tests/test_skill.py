@@ -1355,6 +1355,23 @@ def test_extract_health_perimeter_gocs_no_h(tmp_path: Path) -> None:
     assert extract_health_perimeter_gocs(str(fixture)) == []
 
 
+def test_extract_health_perimeter_gocs_auto_detects_delimiter(tmp_path: Path) -> None:
+    """CSV files exported with ',' or tab as separator must also work."""
+    for label, delimiter in [("comma", ","), ("tab", "\t")]:
+        fixture = tmp_path / f"transcodifica_{label}.csv"
+        lines = [
+            ("GOC_ID", "Aggregation1", "Aggregation2", "H-NH"),
+            ("IT05RRIBOND", "Commercial P&C", "PAA_Ceded", "NH"),
+            ("IT05RRIEEBB", "P&C - Health", "PAA_Ceded", "H"),
+        ]
+        fixture.write_text(
+            "\n".join(delimiter.join(row) for row in lines),
+            encoding="utf-8-sig",
+        )
+        result = extract_health_perimeter_gocs(str(fixture))
+        assert result == ["IT05RRIEEBB"], f"failed for {label}-separated file: {result}"
+
+
 def test_create_mp_model_point_happy_path(tmp_path: Path) -> None:
     """Two files (current + previous), sums per (GoC, year), aggregations."""
     curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
