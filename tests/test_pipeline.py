@@ -352,18 +352,16 @@ def _build_curve_id_param_fixture(path: Path, rows: list[tuple]) -> None:
     _write_csv(path, out)
 
 
-def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
+def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
+    """Astra now receives (GoC, accident_year) pairs from Sunrise instead of
+    reading the legacy AAI_P&C_Ceded file."""
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
-    ceded = inputs_dir / "1.1_2024.12.31_AAI_P&C_Ceded.xlsx"
-    _build_ceded_with_pairs_fixture(
-        ceded,
-        [
-            ("IT05PABPPLE", 2024),
-            ("IT05PABPPLE", 2023),
-            ("IT06ABCDE", 2024),
-        ],
-    )
+    sunrise_pairs = [
+        {"goc_id": "IT05PABPPLE2024", "goc": "IT05PABPPLE", "year": 2024},
+        {"goc_id": "IT05PABPPLE2023", "goc": "IT05PABPPLE", "year": 2023},
+        {"goc_id": "IT06ABCDE2024", "goc": "IT06ABCDE", "year": 2024},
+    ]
     pp_params = inputs_dir / "1.4_2024.12.31_PROJECTION_PARAMETERS_ENTITY.csv"
     _build_projection_parameters_fixture(pp_params)
     mp_goc_seg = inputs_dir / "1.5_2024.12.31_MP_GOC_SEG.csv"
@@ -392,7 +390,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     _build_mp_goc_fixture(mp_goc, [2014, 2024])
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
+        input_paths=[pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
         entities=[(6, "AAI")],
         year=2024,
@@ -402,6 +400,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
         actuarial_aom_impact_pairs=[("DA_LIC_OP", 0), ("DA_LIC_CLO", 0)],
         closing_curve_name="pippo",
         opening_curve_name="carlo",
+        goc_cohort_pairs=sunrise_pairs,
     )
 
     assert outputs == [
@@ -502,17 +501,13 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     """Pairs outside [year-15, year] are dropped before generation."""
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
-    ceded = inputs_dir / "1.1_2024.12.31_AAI_P&C_Ceded.xlsx"
-    _build_ceded_with_pairs_fixture(
-        ceded,
-        [
-            ("IT05PABPPLE", 2024),  # kept (= year)
-            ("IT05PABPPLE", 2009),  # kept (= year - 15)
-            ("IT05PABPPLE", 2008),  # dropped (year - 16)
-            ("IT05PABPPLE", 2030),  # dropped (> year)
-            ("IT06ABCDE", 2020),    # kept (within window)
-        ],
-    )
+    sunrise_pairs = [
+        {"goc_id": "IT05PABPPLE2024", "goc": "IT05PABPPLE", "year": 2024},  # kept
+        {"goc_id": "IT05PABPPLE2009", "goc": "IT05PABPPLE", "year": 2009},  # kept
+        {"goc_id": "IT05PABPPLE2008", "goc": "IT05PABPPLE", "year": 2008},  # dropped
+        {"goc_id": "IT05PABPPLE2030", "goc": "IT05PABPPLE", "year": 2030},  # dropped
+        {"goc_id": "IT06ABCDE2020", "goc": "IT06ABCDE", "year": 2020},      # kept
+    ]
     pp_params = inputs_dir / "1.4_PROJECTION_PARAMETERS_ENTITY.csv"
     _build_projection_parameters_fixture(pp_params)
     mp_goc_seg = inputs_dir / "1.5_MP_GOC_SEG.csv"
@@ -525,7 +520,7 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     _build_mp_goc_fixture(mp_goc, [])
 
     outputs = run_astra_phase1(
-        input_paths=[ceded, pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
+        input_paths=[pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
         entities=[(6, "AAI")],
         year=2024,
@@ -535,6 +530,7 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
         actuarial_aom_impact_pairs=[],
         closing_curve_name="",
         opening_curve_name="",
+        goc_cohort_pairs=sunrise_pairs,
     )
 
     # Only 3 of the 5 pairs survive the filter
@@ -547,11 +543,12 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     ]
 
 
-def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:
+def test_run_astra_phase1_missing_required_input(tmp_path: Path) -> None:
+    """PROJECTION_PARAMETERS_ENTITY (still mandatory) is missing -> error."""
     other = tmp_path / "irrelevant.xlsx"
     openpyxl.Workbook().save(other)
 
-    with pytest.raises(FileNotFoundError, match="AAI_P&C_Ceded"):
+    with pytest.raises(FileNotFoundError, match="PROJECTION_PARAMETERS_ENTITY"):
         run_astra_phase1(
             input_paths=[other],
             run_dir=tmp_path,
@@ -563,4 +560,5 @@ def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:
             actuarial_aom_impact_pairs=[],
             closing_curve_name="",
             opening_curve_name="",
+            goc_cohort_pairs=[],
         )

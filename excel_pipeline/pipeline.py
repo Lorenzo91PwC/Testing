@@ -260,6 +260,7 @@ def run_phase1(
             ra_path,
             payment_pattern_path,
         ],
+        "goc_cohort_pairs": mp_result["goc_cohort_pairs"],
         "entities": entities,
         "year": year,
         "semester": semester,
@@ -280,14 +281,16 @@ def run_astra_phase1(
     actuarial_aom_impact_pairs: list[tuple[str, Any]],
     closing_curve_name: str,
     opening_curve_name: str,
+    goc_cohort_pairs: list[dict[str, Any]],
 ) -> list[Path]:
     """Astra Phase 1.
 
-    Reads the Ceded input file (suffix ``AAI_P&C_Ceded``): from sheet
-    ``AAI_P&C_Ceded_H_NH``, columns AA (GoC code) and AB (cohort year)
-    are joined into ``GOC_ID`` strings (e.g. ``IT05PABPPLE2024``) and
-    deduped. The resulting list is then capped to the 16-year window
-    ``[year - 15, year]`` — pairs outside that window are dropped.
+    The ``(GoC, accident_year)`` pairs that drive NEW_BUSINESS_PPOS,
+    COVERAGE_UNIT, REINSURANCE and MANDATORY_ACTUALS come from the
+    Sunrise run (``goc_cohort_pairs`` parameter — typically read from
+    session state). The legacy ``AAI_P&C_Ceded`` upload is no longer
+    consumed by Astra. The supplied pairs are filtered to the 16-year
+    window ``[year - 15, year]`` before driving the outputs.
 
     Writes:
 
@@ -316,18 +319,23 @@ def run_astra_phase1(
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.csv`` — empty placeholder.
     - ``{run_dir}/OCI_OPTION_CF_OPENING.csv`` — empty placeholder.
 
+    ``goc_cohort_pairs`` is the list of ``{"goc_id", "goc", "year"}``
+    dicts produced by the Sunrise run (typically read from session
+    state by the Astra page). It replaces the legacy
+    ``AAI_P&C_Ceded`` upload that this pipeline used to read directly.
+
     ``entities`` is accepted for symmetry with the Astra UI form (which
     now mirrors the Sunrise multiselect with ``X - name`` free-form
     entries) but is not used by the current transformations.
     """
     del entities  # reserved for future skills
 
-    ceded_path = _find_file_by_suffix(input_paths, CEDED_SUFFIX)
-    raw_pairs = extract_unique_goc_cohort_pairs(str(ceded_path))["pairs"]
-
-    # Cap at the 16-year window around the analysis year.
+    # Cap the Sunrise-produced pairs at the 16-year window around the
+    # Astra analysis year.
     min_year = year - (ASTRA_COHORT_YEAR_SPAN - 1)
-    pairs = [p for p in raw_pairs if min_year <= p["year"] <= year]
+    pairs = [
+        p for p in goc_cohort_pairs if min_year <= p["year"] <= year
+    ]
 
     new_business_path = run_dir / "NEW_BUSINESS_PPOS.csv"
     create_new_business_ppos(pairs=pairs, output_path=str(new_business_path))

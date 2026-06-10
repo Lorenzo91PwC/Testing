@@ -226,12 +226,25 @@ for _, row in aom_impact_df.iterrows():
         continue
     aom_impact_pairs.append((step_str, val))
 
+# The (GoC, accident_year) pairs come from the Sunrise run via
+# session_state — replacing the legacy AAI_P&C_Ceded upload that used
+# to drive Astra. If Sunrise has not been run yet in this session,
+# block the pipeline with a clear message.
+sunrise_pairs = st.session_state.get("sunrise_goc_cohort_pairs")
+sunrise_ready = bool(sunrise_pairs)
+if not sunrise_ready:
+    st.error(
+        "❌ Astra needs the GoC list from the Sunrise run. Open the "
+        "**Sunrise** page, click Run there, then come back.",
+        icon="🚫",
+    )
+
 run_clicked = st.button(
     "▶ Run pipeline",
     type="primary",
-    disabled=not (uploaded and parsed_entities),
+    disabled=not (uploaded and parsed_entities and sunrise_ready),
 )
-if run_clicked and uploaded and parsed_entities:
+if run_clicked and uploaded and parsed_entities and sunrise_ready:
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     run_dir = RUNS_DIR / run_id
     inputs_dir = run_dir / "inputs"
@@ -256,6 +269,7 @@ if run_clicked and uploaded and parsed_entities:
                 actuarial_aom_impact_pairs=aom_impact_pairs,
                 closing_curve_name=closing_curve_name.strip(),
                 opening_curve_name=opening_curve_name.strip(),
+                goc_cohort_pairs=sunrise_pairs,
             )
             for out in outputs:
                 st.write(f"✅ → `{out.name}`")

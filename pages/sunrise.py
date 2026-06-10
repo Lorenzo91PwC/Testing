@@ -179,6 +179,13 @@ with col_main:
                     for out in phase1_result["outputs"]:
                         st.write(f"✅ Phase 1 → `{out.name}`")
 
+                    # Expose the (GoC, accident_year) pairs to the Astra
+                    # page via session_state so it no longer needs the
+                    # legacy AAI_P&C_Ceded upload to derive them.
+                    st.session_state.sunrise_goc_cohort_pairs = (
+                        phase1_result["goc_cohort_pairs"]
+                    )
+
                     status.update(label="Pipeline complete", state="complete")
                 except Exception as e:
                     status.update(label=f"Failed: {e}", state="error")

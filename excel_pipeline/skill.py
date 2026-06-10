@@ -530,6 +530,24 @@ def create_mp_model_point(
         if e["SINISTRI"] != 0.0 or e["RISERVA_SINISTRI"] != 0.0
     }
     filtered_goc_list = [g for g in goc_list if g in nonzero]
+
+    # Unique (GoC, ANNO) pairs across all source files, restricted to the
+    # non-zero GoC set and preserving first-seen order. Same shape as
+    # the dicts produced by ``extract_unique_goc_cohort_pairs``, so that
+    # downstream consumers (the Astra page) can reuse them as-is.
+    pairs: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, int]] = set()
+    for entry in master:
+        goc = entry["GOC"]
+        if goc not in nonzero:
+            continue
+        acc_year = int(entry["ANNO"])
+        key = (goc, acc_year)
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        pairs.append({"goc_id": f"{goc}{acc_year}", "goc": goc, "year": acc_year})
+
     out_rows = _emit_mp_model_point_rows(master, transcodifica, year)
     _write_csv_rows(output_path, [MP_MODEL_POINT_HEADERS, *out_rows])
     return {
@@ -537,6 +555,7 @@ def create_mp_model_point(
         "rows": len(out_rows),
         "columns": MP_MODEL_POINT_HEADERS,
         "goc_list": filtered_goc_list,
+        "goc_cohort_pairs": pairs,
     }
 
 
