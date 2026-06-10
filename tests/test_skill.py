@@ -949,6 +949,33 @@ def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
     assert rows[3] == ("Y_02_P&C", None, "02_P&C", 1)
 
 
+def test_update_mp_goc_seg_accepts_tab_separated_input(tmp_path: Path) -> None:
+    """A tab-separated input must be parsed correctly (delimiter auto-detect)."""
+    fixture = tmp_path / "in.csv"
+    fixture.write_text(
+        "\n".join([
+            "GOC_SEG_ID\tGOC_ID\tSEG_ID\tALLOCATION_RATIO",
+            "IT05RRIEEBB2025_02_P&C\tIT05RRIEEBB2025\t02_P&C\t1",
+            "IT05RRIEEBB2024_02_P&C\tIT05RRIEEBB2024\t02_P&C\t1",
+            "IT05PABPPLE2024_02_P&C\tIT05PABPPLE2024\t02_P&C\t1",
+        ]),
+        encoding="utf-8-sig",
+    )
+
+    output = tmp_path / "out.csv"
+    result = update_mp_goc_seg(
+        input_path=str(fixture),
+        output_path=str(output),
+        health_perimeter_gocs=["IT05RRIEEBB"],
+    )
+
+    assert result["rows_in_perimeter"] == 2
+    rows = _read_csv(output)
+    assert rows[1] == ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1)
+    assert rows[2] == ("IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1)
+    assert rows[3] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
+
+
 def test_update_mp_goc_seg_truncates_trailing_empty_columns(tmp_path: Path) -> None:
     """Input rows with trailing empty cells must not surface as ``1;;;`` in output."""
     fixture = tmp_path / "in.csv"

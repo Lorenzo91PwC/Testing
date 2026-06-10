@@ -45,14 +45,33 @@ def list_run_files(run_dir: Path) -> list[Path]:
     return sorted(run_dir.glob("*.csv"))
 
 
+def _sniff_csv_delimiter(sample: str, fallback: str = ";") -> str:
+    """Return the most likely CSV delimiter for ``sample``.
+
+    Checked candidates: ``;``, ``,`` and ``\\t``. Falls back to
+    ``fallback`` (``;`` by default) when ``csv.Sniffer`` cannot decide.
+    """
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
+        return dialect.delimiter
+    except csv.Error:
+        return fallback
+
+
 def _read_csv_table(path: str) -> list[list[Any]]:
     """Read a CSV into a list of rows; empty cells are normalised to ``None``.
 
-    Uses the European convention (``;`` field separator), matching what
-    ``_write_csv_rows`` produces.
+    The field separator is auto-detected among ``;``, ``,`` and ``\\t``
+    by sniffing the first part of the file. Files written by
+    ``_write_csv_rows`` (semicolon-separated) are detected as-is; files
+    exported from Excel with a different list separator — common for
+    user-uploaded inputs like MP_GOC_SEG — are also handled correctly.
     """
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f, delimiter=";")
+        sample = f.read(4096)
+        f.seek(0)
+        delim = _sniff_csv_delimiter(sample)
+        reader = csv.reader(f, delimiter=delim)
         return [[(cell if cell != "" else None) for cell in row] for row in reader]
 
 
@@ -288,11 +307,7 @@ def _read_transcodifica_rows(path: str) -> list[list[Any]]:
         with open(path, newline="", encoding="utf-8-sig") as f:
             sample = f.read(4096)
             f.seek(0)
-            try:
-                dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
-                delim = dialect.delimiter
-            except csv.Error:
-                delim = ";"
+            delim = _sniff_csv_delimiter(sample)
             for raw in csv.reader(f, delimiter=delim):
                 rows.append(list(raw))
     else:
