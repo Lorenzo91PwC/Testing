@@ -166,6 +166,20 @@ with col_open_curve:
 health_perimeter_gocs = list(
     st.session_state.get("sunrise_health_perimeter_gocs") or []
 )
+if health_perimeter_gocs:
+    with st.expander(
+        f"🏥 Health perimeter — {len(health_perimeter_gocs)} GoC(s) from Transcodifica",
+        expanded=False,
+    ):
+        st.write(health_perimeter_gocs)
+else:
+    st.warning(
+        "⚠️ Health perimeter is empty — either Sunrise has not been run "
+        "yet in this session, or the Transcodifica file does not contain "
+        "any row with column D (H-NH) set to **H**. MP_GOC_SEG will be "
+        "produced without any P&C → HLTH_PC substitution.",
+        icon="🏥",
+    )
 
 st.info(
     "💡 **AOM Impact rows** — for every (GoC, year) found in the Ceded "

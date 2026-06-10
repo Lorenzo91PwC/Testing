@@ -977,6 +977,7 @@ def test_update_mp_goc_seg_truncates_trailing_empty_columns(tmp_path: Path) -> N
     assert rows[2] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
 
 
+
 def _build_aom_impact_fixture(path: Path, rows: list[tuple]) -> None:
     """rows: list of (goc_id, step_id, value). Header is added."""
     out: list[tuple] = [("GOC_ID", "STEP_ID", 1)]
