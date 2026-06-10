@@ -272,8 +272,7 @@ def run_phase1(
 def run_astra_phase1(
     input_paths: list[Path],
     run_dir: Path,
-    entity_id: int,
-    entity_name: str,
+    entities: list[tuple[int, str]],
     year: int,
     semester: int,
     business_type: str,
@@ -317,10 +316,11 @@ def run_astra_phase1(
     - ``{run_dir}/OCI_OPTION_CF_CLOSING.csv`` — empty placeholder.
     - ``{run_dir}/OCI_OPTION_CF_OPENING.csv`` — empty placeholder.
 
-    ``entity_id`` and ``entity_name`` are accepted for symmetry with the
-    Astra UI form but are not used by the current transformations.
+    ``entities`` is accepted for symmetry with the Astra UI form (which
+    now mirrors the Sunrise multiselect with ``X - name`` free-form
+    entries) but is not used by the current transformations.
     """
-    del entity_id, entity_name  # reserved for future skills
+    del entities  # reserved for future skills
 
     ceded_path = _find_file_by_suffix(input_paths, CEDED_SUFFIX)
     raw_pairs = extract_unique_goc_cohort_pairs(str(ceded_path))["pairs"]

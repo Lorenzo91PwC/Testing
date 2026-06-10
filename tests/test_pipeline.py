@@ -394,8 +394,7 @@ def test_run_astra_phase1_uses_pairs_from_ceded(tmp_path: Path) -> None:
     outputs = run_astra_phase1(
         input_paths=[ceded, pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
-        entity_id=6,
-        entity_name="AAI",
+        entities=[(6, "AAI")],
         year=2024,
         semester=2,
         business_type="Diretto",
@@ -528,8 +527,7 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     outputs = run_astra_phase1(
         input_paths=[ceded, pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
-        entity_id=6,
-        entity_name="AAI",
+        entities=[(6, "AAI")],
         year=2024,
         semester=2,
         business_type="Diretto",
@@ -557,8 +555,7 @@ def test_run_astra_phase1_missing_ceded(tmp_path: Path) -> None:
         run_astra_phase1(
             input_paths=[other],
             run_dir=tmp_path,
-            entity_id=6,
-            entity_name="AAI",
+            entities=[(6, "AAI")],
             year=2024,
             semester=2,
             business_type="Diretto",

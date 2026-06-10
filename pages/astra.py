@@ -6,6 +6,7 @@ pipeline runs on those.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,27 @@ import streamlit as st
 
 from excel_pipeline.pipeline import run_astra_phase1
 from excel_pipeline.skill import list_run_files
+
+_ENTITY_FREEFORM_RE = re.compile(r"^\s*(\d+)\s*-\s*(.+?)\s*$")
+
+
+def _parse_entity_selection(item: object) -> tuple[int, str] | None:
+    """Normalize a multiselect entry to a ``(id, name)`` tuple.
+
+    Accepts:
+    - the original ``(id, name)`` tuple from the preset list,
+    - a free-form string the user typed in the format ``"X - name"`` where
+      ``X`` is a positive integer and ``name`` is non-empty.
+
+    Returns ``None`` for anything that does not match.
+    """
+    if isinstance(item, tuple) and len(item) == 2:
+        return item
+    if isinstance(item, str):
+        m = _ENTITY_FREEFORM_RE.match(item)
+        if m:
+            return (int(m.group(1)), m.group(2).strip())
+    return None
 
 # ---------------------------------------------------------------------------
 # Config
@@ -105,11 +127,32 @@ with col_type:
         options=["Diretto", "Ceduto"],
         horizontal=True,
     )
-entity = st.selectbox(
-    "Entity to analyze",
-    options=ENTITIES,
-    format_func=lambda e: f"{e[0]} — {e[1]}",
+st.caption(
+    "Entities to analyze — pick from the list or type a new one in "
+    "the format `X - name` (e.g. `99 - CUSTOM`) and press Enter."
 )
+raw_entity_selection = st.multiselect(
+    "Entities to analyze",
+    options=ENTITIES,
+    default=[ENTITIES[1]],
+    format_func=lambda e: f"{e[0]} — {e[1]}",
+    accept_new_options=True,
+    label_visibility="collapsed",
+)
+parsed_entities: list[tuple[int, str]] = []
+invalid_entries: list[str] = []
+for item in raw_entity_selection:
+    parsed = _parse_entity_selection(item)
+    if parsed is None:
+        invalid_entries.append(str(item))
+    else:
+        parsed_entities.append(parsed)
+if invalid_entries:
+    st.warning(
+        "These entries don't match the `X - name` format and were "
+        f"ignored: {invalid_entries}",
+        icon="⚠️",
+    )
 
 col_close_curve, col_open_curve = st.columns(2)
 with col_close_curve:
@@ -186,10 +229,9 @@ for _, row in aom_impact_df.iterrows():
 run_clicked = st.button(
     "▶ Run pipeline",
     type="primary",
-    disabled=not (uploaded and entity),
+    disabled=not (uploaded and parsed_entities),
 )
-if run_clicked and uploaded and entity:
-    entity_id, entity_name = entity
+if run_clicked and uploaded and parsed_entities:
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     run_dir = RUNS_DIR / run_id
     inputs_dir = run_dir / "inputs"
@@ -206,8 +248,7 @@ if run_clicked and uploaded and entity:
             outputs = run_astra_phase1(
                 input_paths=input_paths,
                 run_dir=run_dir,
-                entity_id=entity_id,
-                entity_name=entity_name,
+                entities=parsed_entities,
                 year=int(year),
                 semester=int(semester),
                 business_type=business_type,
