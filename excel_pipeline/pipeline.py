@@ -58,69 +58,6 @@ TRANSCODIFICA_SUFFIX = "Transcodifica_aggregazione_GOC_H_NH"
 _DATE_RE = re.compile(r"(\d{4})\.(\d{2})\.(\d{2})")
 
 
-def _expected_sunrise_dates(year: int, semester: int) -> tuple[str, str]:
-    """Return the two ``YYYY.MM.DD`` strings the Sunrise inputs must cover.
-
-    Semester convention: ``1 = HY = June 30``, ``2 = FY = December 31``.
-    The first string is the analysis date, the second is the previous year.
-    """
-    if semester == 1:
-        month_day = "06.30"
-    elif semester == 2:
-        month_day = "12.31"
-    else:
-        raise ValueError(f"semester must be 1 or 2, got {semester}")
-    return (f"{year}.{month_day}", f"{year - 1}.{month_day}")
-
-
-def _files_ending_with(paths: list[Path], suffix: str) -> list[Path]:
-    """All uploaded files whose stem ends with ``suffix`` (zero or more)."""
-    return [p for p in paths if p.stem.endswith(suffix)]
-
-
-def _files_with_date(paths: list[Path], date_str: str) -> list[Path]:
-    """All uploaded files whose name contains ``date_str``."""
-    return [p for p in paths if date_str in p.name]
-
-
-def validate_sunrise_inputs(
-    input_paths: list[Path], year: int, semester: int
-) -> list[str]:
-    """Validate the Sunrise input upload set.
-
-    Required:
-    - at least one file with suffix ``Transcodifica_aggregazione_GOC_H_NH``;
-    - for each expected date (analysis date and previous year), at least one
-      file with suffix ``_Ceded`` and the date in its name.
-
-    ``_Assumed`` files are optional (used for the GoC list if present).
-
-    Returns a list of human-readable error messages; an empty list means
-    the upload is OK.
-    """
-    errors: list[str] = []
-
-    transcodifica_files = _files_ending_with(input_paths, TRANSCODIFICA_SUFFIX)
-    if not transcodifica_files:
-        errors.append(
-            f"Missing the master list file: no upload ends with "
-            f"'{TRANSCODIFICA_SUFFIX}'."
-        )
-
-    expected_dates = _expected_sunrise_dates(year, semester)
-    ceded_files = _files_ending_with(input_paths, SUNRISE_CEDED_SUFFIX)
-    for date_str in expected_dates:
-        ceded_for_date = [p for p in ceded_files if date_str in p.name]
-        if not ceded_for_date:
-            errors.append(
-                f"Missing a _Ceded file for date {date_str}. Upload at "
-                f"least one file ending with '_Ceded' that contains "
-                f"{date_str} in its name."
-            )
-
-    return errors
-
-
 def _find_file_by_suffix(paths: list[Path], suffix: str) -> Path:
     """Return the single uploaded file whose stem ends with ``suffix``."""
     matches = [p for p in paths if p.stem.endswith(suffix)]
@@ -179,8 +116,8 @@ def run_phase1(
     - ``outputs``: the produced files in order;
     - ``entities``, ``year``, ``semester``: echoed.
 
-    Callers should run ``validate_sunrise_inputs`` first to surface a
-    clear UI error when an expected file is missing.
+    Callers should run ``input_validation.validate_sunrise_inputs``
+    first to surface a clear UI error when an expected file is missing.
     """
     sunrise_paths = [
         p for p in input_paths

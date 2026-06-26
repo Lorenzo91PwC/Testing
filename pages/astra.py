@@ -14,9 +14,38 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from excel_pipeline.input_validation import (
+    ValidationReport,
+    validate_astra_inputs,
+)
 from excel_pipeline.pipeline import run_astra_phase1
 from excel_pipeline.skill import list_run_files
 from excel_pipeline.user_prefs import load_pref, save_pref
+
+
+def _render_validation_report(report: ValidationReport) -> None:
+    """Show errors with ``st.error`` and warnings with ``st.warning``."""
+    if report.errors:
+        bullets = "\n".join(
+            f"- **{i.file}** — {i.location} — {i.message}"
+            for i in report.errors
+        )
+        st.error(
+            "❌ **Cannot run the pipeline — input validation failed:**\n\n"
+            f"{bullets}\n\n"
+            "Fix the file(s) and click Run again.",
+            icon="🚫",
+        )
+    if report.warnings:
+        bullets = "\n".join(
+            f"- **{i.file}** — {i.location} — {i.message}"
+            for i in report.warnings
+        )
+        st.warning(
+            "⚠️ **Input validation warnings** (run continues):\n\n"
+            f"{bullets}",
+            icon="⚠️",
+        )
 
 _ENTITY_FREEFORM_RE = re.compile(r"^\s*(\d+)\s*-\s*(.+?)\s*$")
 
@@ -255,29 +284,37 @@ if run_clicked and uploaded and parsed_entities and sunrise_ready:
         p = inputs_dir / f.name
         p.write_bytes(f.getvalue())
         input_paths.append(p)
-    st.session_state.astra_run_id = run_id
 
-    with st.status("Running Astra pipeline...", expanded=True) as status:
-        try:
-            outputs = run_astra_phase1(
-                input_paths=input_paths,
-                run_dir=run_dir,
-                entities=parsed_entities,
-                year=int(year),
-                semester=int(semester),
-                business_type=business_type,
-                health_perimeter_gocs=health_perimeter_gocs,
-                actuarial_aom_impact_pairs=aom_impact_pairs,
-                closing_curve_name=closing_curve_name.strip(),
-                opening_curve_name=opening_curve_name.strip(),
-                goc_cohort_pairs=sunrise_pairs,
-            )
-            for out in outputs:
-                st.write(f"✅ → `{out.name}`")
-            status.update(label="Pipeline complete", state="complete")
-        except Exception as e:
-            status.update(label=f"Failed: {e}", state="error")
-            st.exception(e)
+    report = validate_astra_inputs(input_paths)
+    _render_validation_report(report)
+    report.save(run_dir / "validation.json")
+
+    if report.is_blocking:
+        # Errors already rendered above; do not start the pipeline.
+        pass
+    else:
+        st.session_state.astra_run_id = run_id
+        with st.status("Running Astra pipeline...", expanded=True) as status:
+            try:
+                outputs = run_astra_phase1(
+                    input_paths=input_paths,
+                    run_dir=run_dir,
+                    entities=parsed_entities,
+                    year=int(year),
+                    semester=int(semester),
+                    business_type=business_type,
+                    health_perimeter_gocs=health_perimeter_gocs,
+                    actuarial_aom_impact_pairs=aom_impact_pairs,
+                    closing_curve_name=closing_curve_name.strip(),
+                    opening_curve_name=opening_curve_name.strip(),
+                    goc_cohort_pairs=sunrise_pairs,
+                )
+                for out in outputs:
+                    st.write(f"✅ → `{out.name}`")
+                status.update(label="Pipeline complete", state="complete")
+            except Exception as e:
+                status.update(label=f"Failed: {e}", state="error")
+                st.exception(e)
 
 # Show files produced in the current run
 if st.session_state.astra_run_id:

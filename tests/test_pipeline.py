@@ -10,7 +10,6 @@ import pytest
 from excel_pipeline.pipeline import (
     run_astra_phase1,
     run_phase1,
-    validate_sunrise_inputs,
 )
 
 
@@ -228,60 +227,6 @@ def test_run_phase1_raises_without_any_ceded_or_assumed(tmp_path: Path) -> None:
             year=2025,
             semester=2,
         )
-
-
-def test_validate_sunrise_inputs_missing_transcodifica(tmp_path: Path) -> None:
-    ceded = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded, ["Motor"])
-    ceded_prev = tmp_path / "1.2_2024.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_prev, ["Motor"])
-
-    errors = validate_sunrise_inputs(
-        [ceded, ceded_prev], year=2025, semester=2,
-    )
-    assert any("Transcodifica" in e for e in errors)
-
-
-def test_validate_sunrise_inputs_missing_ceded_for_one_date(tmp_path: Path) -> None:
-    ceded_curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_curr, ["Motor"])
-    transcodifica = tmp_path / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
-    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
-
-    errors = validate_sunrise_inputs(
-        [ceded_curr, transcodifica], year=2025, semester=2,
-    )
-    # Current-year date is covered; previous-year date is missing
-    assert any("2024.12.31" in e for e in errors)
-    assert not any("2025.12.31" in e for e in errors)
-
-
-def test_validate_sunrise_inputs_all_present_no_errors(tmp_path: Path) -> None:
-    ceded_curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_curr, ["Motor"])
-    ceded_prev = tmp_path / "1.2_2024.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_prev, ["Motor"])
-    transcodifica = tmp_path / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
-    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
-
-    errors = validate_sunrise_inputs(
-        [ceded_curr, ceded_prev, transcodifica], year=2025, semester=2,
-    )
-    assert errors == []
-
-
-def test_validate_sunrise_inputs_hy_semester_uses_june_30(tmp_path: Path) -> None:
-    ceded_curr = tmp_path / "1.1_2025.06.30_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_curr, ["Motor"])
-    ceded_prev = tmp_path / "1.2_2024.06.30_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(ceded_prev, ["Motor"])
-    transcodifica = tmp_path / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
-    transcodifica.write_text("dummy\n", encoding="utf-8-sig")
-
-    errors = validate_sunrise_inputs(
-        [ceded_curr, ceded_prev, transcodifica], year=2025, semester=1,
-    )
-    assert errors == []
 
 
 def _build_ceded_with_pairs_fixture(

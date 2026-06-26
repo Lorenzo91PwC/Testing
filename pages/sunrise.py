@@ -16,9 +16,38 @@ from pathlib import Path
 
 import streamlit as st
 
-from excel_pipeline.pipeline import run_phase1, validate_sunrise_inputs
+from excel_pipeline.input_validation import (
+    ValidationReport,
+    validate_sunrise_inputs,
+)
+from excel_pipeline.pipeline import run_phase1
 from excel_pipeline.skill import list_run_files
 from excel_pipeline.user_prefs import load_pref, save_pref
+
+
+def _render_validation_report(report: ValidationReport) -> None:
+    """Show errors with ``st.error`` and warnings with ``st.warning``."""
+    if report.errors:
+        bullets = "\n".join(
+            f"- **{i.file}** — {i.location} — {i.message}"
+            for i in report.errors
+        )
+        st.error(
+            "❌ **Cannot run the pipeline — input validation failed:**\n\n"
+            f"{bullets}\n\n"
+            "Fix the file(s) and click Run again.",
+            icon="🚫",
+        )
+    if report.warnings:
+        bullets = "\n".join(
+            f"- **{i.file}** — {i.location} — {i.message}"
+            for i in report.warnings
+        )
+        st.warning(
+            "⚠️ **Input validation warnings** (run continues):\n\n"
+            f"{bullets}",
+            icon="⚠️",
+        )
 
 _ENTITY_FREEFORM_RE = re.compile(r"^\s*(\d+)\s*-\s*(.+?)\s*$")
 
@@ -153,17 +182,17 @@ with col_main:
             p.write_bytes(f.getvalue())
             input_paths.append(p)
 
-        validation_errors = validate_sunrise_inputs(
+        report = validate_sunrise_inputs(
             input_paths, year=int(year), semester=int(semester)
         )
-        if validation_errors:
-            bullet_list = "\n".join(f"- {e}" for e in validation_errors)
-            st.error(
-                "❌ **Cannot run the pipeline — required inputs are missing:**\n\n"
-                f"{bullet_list}\n\n"
-                "Upload the missing file(s) and click Run again.",
-                icon="🚫",
-            )
+        _render_validation_report(report)
+        # Always persist the report next to the run, so the user can audit
+        # both successful runs and blocked runs after the fact.
+        report.save(run_dir / "validation.json")
+
+        if report.is_blocking:
+            # Errors already rendered above; nothing else to do.
+            pass
         else:
             st.session_state.sunrise_run_id = run_id
             st.session_state.chat_history = []
