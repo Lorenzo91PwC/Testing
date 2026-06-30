@@ -1366,6 +1366,38 @@ def test_update_mp_goc_invalid_semester(tmp_path: Path) -> None:
         )
 
 
+def test_update_mp_goc_populates_t_and_u_with_goc_name(tmp_path: Path) -> None:
+    """Columns T (AGGREG_4_ID, idx 19) and U (AGGREG_5_ID, idx 20) are
+    populated on every data row with the GoC name extracted from col A
+    by stripping the trailing cohort-year suffix. Rows with an
+    unparseable cohort year fall back to the raw col A value.
+    """
+    fixture = tmp_path / "MP_GOC.csv"
+    output = tmp_path / "out.csv"
+    rows: list[tuple] = [_MP_GOC_HEADERS]
+    real_row = (
+        "IT05PABPPLE2024", "PAA", 2024, 20,
+    ) + (None,) * (len(_MP_GOC_HEADERS) - 4)
+    no_cohort_row = (
+        "IT06ABCDE2025", "PAA", "", 20,
+    ) + (None,) * (len(_MP_GOC_HEADERS) - 4)
+    rows.extend([real_row, no_cohort_row])
+    _write_csv(fixture, rows)
+
+    update_mp_goc(
+        input_path=str(fixture), output_path=str(output),
+        year=2024, semester=2, business_type="",
+    )
+
+    out_rows = _read_csv(output)
+    # Real cohort year → strip the trailing "2024" off "IT05PABPPLE2024"
+    assert out_rows[1][19] == "IT05PABPPLE"
+    assert out_rows[1][20] == "IT05PABPPLE"
+    # Unparseable cohort year → fall back to the raw GOC_ID
+    assert out_rows[2][19] == "IT06ABCDE2025"
+    assert out_rows[2][20] == "IT06ABCDE2025"
+
+
 def _build_input_sunrise_rows_fixture(
     path: Path, rows: list[tuple[str, int, str, float, float]]
 ) -> None:

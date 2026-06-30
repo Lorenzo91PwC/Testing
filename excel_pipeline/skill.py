@@ -1312,6 +1312,12 @@ def update_mp_goc(
       (AGGREG_2_ID) on the same row: ``"3_RE_CEDED_NON_RETRO"`` when
       column R equals ``"PAA_Ceded"`` (whitespace-trimmed),
       ``"2_RE_ASSUMED"`` otherwise (including missing / blank cells).
+    - **T (AGGREG_4_ID, idx 19) and U (AGGREG_5_ID, idx 20)** — both
+      filled with the GoC name read from column A by stripping the
+      trailing cohort-year suffix (e.g. ``IT05PABPPLE2024`` ->
+      ``IT05PABPPLE``). Applied to every data row, including the
+      ones where the cohort year is missing or unparseable (those
+      rows fall back to the unmodified column A value).
 
     ``business_type`` is validated for backward compatibility with the
     Astra UI form but no longer drives any output — column P now
@@ -1352,17 +1358,41 @@ def update_mp_goc(
     rows_changed = 0
     for raw in table[1:]:
         row = list(raw)
-        # Need to access column R (index 17). Pad missing trailing cells.
-        while len(row) < 18:
+        # Need to access columns up to U (index 20). Pad missing
+        # trailing cells.
+        while len(row) < 21:
             row.append(None)
 
+        # Parse the cohort year (col C) up front — we use it both to
+        # drive the E/F/L/P rules and to strip the suffix off column A
+        # for the T/U population.
         cohort_raw = row[2]
+        cohort_year: int | None
         if cohort_raw is None or cohort_raw == "":
-            out_rows.append(row)
-            continue
-        try:
-            cohort_year = int(cohort_raw)
-        except (TypeError, ValueError):
+            cohort_year = None
+        else:
+            try:
+                cohort_year = int(cohort_raw)
+            except (TypeError, ValueError):
+                cohort_year = None
+
+        # Columns T and U carry the GoC name (col A stripped of the
+        # trailing cohort-year suffix). Applied to every data row,
+        # falling back to the raw col A value when the cohort year
+        # can't be parsed.
+        goc_id_str = str(row[0]) if row[0] is not None else ""
+        if cohort_year is not None:
+            suffix = str(cohort_year)
+            if goc_id_str.endswith(suffix):
+                goc_name = goc_id_str[:-len(suffix)]
+            else:
+                goc_name = goc_id_str
+        else:
+            goc_name = goc_id_str
+        row[19] = goc_name
+        row[20] = goc_name
+
+        if cohort_year is None:
             out_rows.append(row)
             continue
 

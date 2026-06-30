@@ -422,6 +422,12 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
     assert by_cohort[2024][11] == 0
     for cohort in (2014, 2024):
         assert by_cohort[cohort][15] == "2_RE_ASSUMED"
+    # T (idx 19) and U (idx 20) carry the GoC name from col A
+    # stripped of its 4-char cohort year suffix. Fixture uses
+    # GOC_ID = ``IT{year}`` so stripping leaves ``IT``.
+    for cohort in (2014, 2024):
+        assert by_cohort[cohort][19] == "IT"
+        assert by_cohort[cohort][20] == "IT"
 
     aom_rows = _read_csv(outputs[7])
     assert aom_rows[0] == ("GOC_ID", "STEP_ID", 1)
