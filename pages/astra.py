@@ -106,20 +106,11 @@ st.title("🚀 Astra Input Builder")
 st.caption("Local pipeline that prepares Astra input files — data never leaves this machine.")
 
 st.warning(
-    "⚠️ **Pending specifications** — the following outputs still need their "
-    "population rules:\n\n"
-    "- `OCI_OPTION_CF_CLOSING.csv` and `OCI_OPTION_CF_OPENING.csv` — "
-    "rules not yet defined; the placeholder emission is currently "
-    "disabled in the pipeline.\n"
-    "- `INCEPTION_FORWARD_RATES.csv` — the source input file (suffix and "
-    "sheet) and the specific rates row to extract are still to be defined; "
-    "the output is not produced yet.\n\n"
-    "`MP_GOC_SEG.csv` is wired and rewrites `P&C` to `HLTH_PC` in "
-    "columns A and C for the GoCs whose H-NH flag is `H` in the "
-    "Transcodifica file uploaded on the Sunrise page. "
-    "`MP_GOC.csv` is wired and rewrites columns E, F, L, P based on "
-    "year, semester and business type.",
-    icon="🚧",
+    "**Warning!** The following outputs must be provided or modified by "
+    "the user:\n\n"
+    "- `OCI_OPTION_CF_CLOSING.csv` and `OCI_OPTION_CF_OPENING.csv`\n"
+    "- `INCEPTION_FORWARD_RATES.csv`",
+    icon="⚠️",
 )
 
 st.subheader("1. Upload input files")
