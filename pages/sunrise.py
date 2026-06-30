@@ -110,6 +110,13 @@ st.caption("Local pipeline that prepares Sunrise input files — data never leav
 col_main, col_chat = st.columns([2, 1])
 
 with col_main:
+    st.warning(
+        "**Warning!** The following outputs must be provided or modified by "
+        "the user:\n\n"
+        "- `IFRs17Rates.csv`",
+        icon="⚠️",
+    )
+
     st.subheader("1. Upload input files")
     uploaded = st.file_uploader(
         "Excel or CSV files",
