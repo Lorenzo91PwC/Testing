@@ -1244,8 +1244,9 @@ def test_update_mp_goc_h2_diretto(tmp_path: Path) -> None:
 
     rows = _read_mp_goc(output)
     # cohort <= 2015 -> fixed value, independent of semester
-    assert rows[2014]["E"] == "20211231_ITA_LP100_AVG"
+    assert rows[2014]["E"] == "20211231_ITA_LP100"
     assert rows[2018]["E"] == "20181231_ITA_LP100_AVG"
+    # cohort 2021 → 2016..2021 bucket, which still appends _AVG
     assert rows[2021]["E"] == "20211231_ITA_LP100_AVG"
     assert rows[2022]["E"] == "20221231_ITA_LP100_FY22_AVG"
     assert rows[2024]["E"] == "20241231_EUR_LP100_FY24_AVG"
@@ -1316,7 +1317,7 @@ def test_update_mp_goc_h1_other_curve_dates(tmp_path: Path) -> None:
     )
     rows = _read_mp_goc(output)
     # cohort <= 2015 -> fixed value, semester does not affect it
-    assert rows[2014]["E"] == "20211231_ITA_LP100_AVG"
+    assert rows[2014]["E"] == "20211231_ITA_LP100"
     assert rows[2022]["E"] == "20220630_ITA_LP100_FY22_AVG"
     assert rows[2025]["E"] == "20250630_EUR_LP100_FY25_AVG"
     assert rows[2025]["F"] == "7_JULY"

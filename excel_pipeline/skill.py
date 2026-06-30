@@ -1272,7 +1272,7 @@ MP_GOC_BUSINESS_TYPE_VALUES = {
 def _mp_goc_inception_curve_id(cohort_year: int, mmdd: str) -> str:
     if cohort_year <= 2015:
         # Fixed value, independent of cohort year and semester.
-        return "20211231_ITA_LP100_AVG"
+        return "20211231_ITA_LP100"
     if cohort_year <= 2021:
         return f"{cohort_year}{mmdd}_ITA_LP100_AVG"
     if cohort_year == 2022:
@@ -1296,7 +1296,7 @@ def update_mp_goc(
 
     - **E (INCEPTION_CURVE_ID, idx 4)** — year-bucketed string, with
       MMDD = ``0630`` for ``semester == 1`` and ``1231`` for ``semester == 2``:
-        - cohort <= 2015: ``"20211231_ITA_LP100_AVG"`` (fixed)
+        - cohort <= 2015: ``"20211231_ITA_LP100"`` (fixed)
         - 2016 <= cohort <= 2021: ``{cohort}{mmdd}_ITA_LP100_AVG``
         - cohort == 2022: ``2022{mmdd}_ITA_LP100_FY22_AVG``
         - cohort >= 2023: ``{cohort}{mmdd}_EUR_LP100_FY{yy}_AVG``

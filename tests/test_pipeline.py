@@ -413,8 +413,8 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
     mp_goc_rows = _read_csv(outputs[6])
     by_cohort = {row[2]: row for row in mp_goc_rows[1:]}
     # E (idx 4), F (idx 5), L (idx 11), P (idx 15)
-    # cohort <= 2015 -> col E is the fixed "20211231_ITA_LP100_AVG"
-    assert by_cohort[2014][4] == "20211231_ITA_LP100_AVG"
+    # cohort <= 2015 -> col E is the fixed "20211231_ITA_LP100"
+    assert by_cohort[2014][4] == "20211231_ITA_LP100"
     assert by_cohort[2024][4] == "20241231_EUR_LP100_FY24_AVG"
     # L uses curve_year = first 4 chars of col E:
     # cohort 2014 -> col E starts "2021" -> max(0, 2024-1-2021)*12 = 24
