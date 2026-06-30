@@ -85,6 +85,7 @@ def run_phase1(
     year: int,
     semester: int,
     gocs_to_exclude: list[str] | None = None,
+    goc_renames: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Phase 1 — Sunrise main outputs.
 
@@ -149,6 +150,7 @@ def run_phase1(
         output_path=str(mp_model_point_path),
         year=year,
         gocs_to_exclude=gocs_to_exclude,
+        goc_renames=goc_renames,
     )
     goc_list = mp_result["goc_list"]
 
@@ -204,6 +206,7 @@ def run_phase1(
         "health_perimeter_gocs": extract_health_perimeter_gocs(
             str(transcodifica_path)
         ),
+        "warnings": list(mp_result.get("warnings", [])),
         "entities": entities,
         "year": year,
         "semester": semester,
@@ -225,7 +228,6 @@ def run_astra_phase1(
     closing_curve_name: str,
     opening_curve_name: str,
     goc_cohort_pairs: list[dict[str, Any]],
-    gocs_to_exclude: list[str] | None = None,
 ) -> list[Path]:
     """Astra Phase 1.
 
@@ -276,20 +278,13 @@ def run_astra_phase1(
     """
     del entities  # reserved for future skills
 
-    # Drop excluded GoCs (matched on the 11-char ``goc`` prefix, so every
-    # cohort year for that GoC is removed in one shot) BEFORE the
-    # 16-year window filter — order doesn't change the result but it
-    # keeps the trace clear when debugging.
-    exclude = {g.strip() for g in (gocs_to_exclude or []) if g and g.strip()}
-    filtered_pairs = [
-        p for p in goc_cohort_pairs if p["goc"] not in exclude
-    ]
-
     # Cap the Sunrise-produced pairs at the 16-year window around the
-    # Astra analysis year.
+    # Astra analysis year. GoC exclusions/renames live on the Sunrise
+    # page only, so by the time the pairs reach Astra they're already
+    # filtered/renamed.
     min_year = year - (ASTRA_COHORT_YEAR_SPAN - 1)
     pairs = [
-        p for p in filtered_pairs if min_year <= p["year"] <= year
+        p for p in goc_cohort_pairs if min_year <= p["year"] <= year
     ]
 
     new_business_path = run_dir / "NEW_BUSINESS_PPOS.csv"

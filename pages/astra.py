@@ -173,23 +173,6 @@ if invalid_entries:
         icon="⚠️",
     )
 
-st.caption(
-    "GOC not to be considered — type an 11-char GOC name "
-    "(e.g. `IT05PABPPLE`) and press Enter to add. Every cohort year "
-    "for the listed GoCs is removed from the Astra outputs."
-)
-gocs_to_exclude_raw = st.multiselect(
-    "GOC not to be considered",
-    options=[],
-    default=[],
-    accept_new_options=True,
-    label_visibility="collapsed",
-    key="astra_gocs_to_exclude",
-)
-gocs_to_exclude = [
-    str(g).strip() for g in gocs_to_exclude_raw if str(g).strip()
-]
-
 col_close_curve, col_open_curve = st.columns(2)
 with col_close_curve:
     closing_curve_name = st.text_input(
@@ -319,7 +302,6 @@ if run_clicked and uploaded and parsed_entities and sunrise_ready:
                     closing_curve_name=closing_curve_name.strip(),
                     opening_curve_name=opening_curve_name.strip(),
                     goc_cohort_pairs=sunrise_pairs,
-                    gocs_to_exclude=gocs_to_exclude,
                 )
                 for out in outputs:
                     st.write(f"✅ → `{out.name}`")

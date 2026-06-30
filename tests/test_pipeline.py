@@ -558,46 +558,130 @@ def test_run_phase1_excludes_gocs(tmp_path: Path) -> None:
     assert cohort_gocs == {"Motor", "Liability"}
 
 
-def test_run_astra_phase1_excludes_gocs(tmp_path: Path) -> None:
-    """``gocs_to_exclude`` filters the cohort pairs by the 11-char GoC
-    prefix so every cohort year is dropped at once."""
+def test_run_phase1_renames_gocs(tmp_path: Path) -> None:
+    """``goc_renames`` rewrites the GoC name in every downstream output
+    (MP_LoB, cohort pairs, etc.) before exclusions are applied."""
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
-    sunrise_pairs = [
-        {"goc_id": "IT05PABPPLE2024", "goc": "IT05PABPPLE", "year": 2024},
-        {"goc_id": "IT05PABPPLE2023", "goc": "IT05PABPPLE", "year": 2023},
-        {"goc_id": "IT06ABCDE2024", "goc": "IT06ABCDE", "year": 2024},
-    ]
-    pp_params = inputs_dir / "PROJECTION_PARAMETERS_ENTITY.csv"
-    _build_projection_parameters_fixture(pp_params)
-    mp_goc_seg = inputs_dir / "MP_GOC_SEG.csv"
-    _build_mp_goc_seg_fixture(mp_goc_seg, [])
-    aom_impact = inputs_dir / "ACTUARIAL_AOM_IMPACT.csv"
-    _build_aom_impact_fixture(aom_impact, [])
-    curve_id_param = inputs_dir / "CURVE_ID_PARAM.csv"
-    _build_curve_id_param_fixture(curve_id_param, [])
-    mp_goc = inputs_dir / "MP_GOC.csv"
-    _build_mp_goc_fixture(mp_goc, [])
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor", "Property"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Property", "Liability"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [
+            ("GOC", "Aggregation1", "Aggregation2"),
+            ("Motor", "Agg1_Motor", "Agg2_Motor"),
+            ("Property", "Agg1_Prop", "Agg2_Prop"),
+        ],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
 
-    outputs = run_astra_phase1(
-        input_paths=[pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
         run_dir=tmp_path,
         entities=[(6, "AAI")],
-        year=2024,
+        year=2025,
         semester=2,
-        business_type="",
-        health_perimeter_gocs=[],
-        actuarial_aom_impact_pairs=[],
-        closing_curve_name="",
-        opening_curve_name="",
-        goc_cohort_pairs=sunrise_pairs,
-        gocs_to_exclude=["IT05PABPPLE"],
+        goc_renames={"Motor": "Auto"},
+    )
+    assert result["warnings"] == []
+
+    # MP_LoB uses the renamed GoC name.
+    mp_lob_rows = _read_csv(result["outputs"][1])
+    gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
+    assert "Motor" not in gocs_in_lob
+    assert "Auto" in gocs_in_lob
+
+    # Cohort pairs handed to Astra also carry the new name.
+    cohort_gocs = {p["goc"] for p in result["goc_cohort_pairs"]}
+    assert "Motor" not in cohort_gocs
+    assert "Auto" in cohort_gocs
+    auto_ids = {p["goc_id"] for p in result["goc_cohort_pairs"] if p["goc"] == "Auto"}
+    assert "Auto2025" in auto_ids
+
+
+def test_run_phase1_rename_then_exclude(tmp_path: Path) -> None:
+    """When the same name is both renamed and excluded, rename wins
+    (acts on input names) and the post-rename name is what the
+    exclusion list compares against."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor", "Property"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [
+            ("GOC", "Aggregation1", "Aggregation2"),
+            ("Motor", "Agg1_Motor", "Agg2_Motor"),
+            ("Property", "Agg1_Prop", "Agg2_Prop"),
+        ],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+        goc_renames={"Motor": "Auto"},
+        gocs_to_exclude=["Auto"],  # post-rename name
     )
 
-    # NEW_BUSINESS_PPOS keeps only IT06ABCDE — both 2024 and 2023 of
-    # IT05PABPPLE are dropped by the 11-char prefix match
-    nb_rows = _read_csv(outputs[0])
-    assert nb_rows == [
-        ("GOC_ID", "VARIABLE_NAME", 1),
-        ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0),
-    ]
+    # Auto (formerly Motor) is excluded; only Property survives.
+    mp_lob_rows = _read_csv(result["outputs"][1])
+    gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
+    assert gocs_in_lob == {"Property"}
+
+
+def test_run_phase1_rename_unknown_old_warning(tmp_path: Path) -> None:
+    """Rename sources not in the input list surface as a warning but
+    the run still completes."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("Motor", "Ag1", "Ag2")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+        goc_renames={"Ghost": "Phantom"},
+    )
+
+    assert result["warnings"] != []
+    assert any("Ghost" in w and "not in the input list" in w for w in result["warnings"])
+    # Real GoCs untouched.
+    mp_lob_rows = _read_csv(result["outputs"][1])
+    gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
+    assert gocs_in_lob == {"Motor"}

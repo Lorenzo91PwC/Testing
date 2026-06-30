@@ -561,6 +561,7 @@ def create_mp_model_point(
     output_path: str,
     year: int,
     gocs_to_exclude: list[str] | None = None,
+    goc_renames: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Create ``MP_ModelPoint.csv`` in two clear stages.
 
@@ -587,6 +588,45 @@ def create_mp_model_point(
     """
     transcodifica = _load_transcodifica_table(transcodifica_path)
     goc_list, master = build_input_sunrise_master_table(sources)
+    warnings_out: list[str] = []
+
+    # Apply renames first so the exclusion list operates on post-rename
+    # names. A rename keeps the data, it just relabels it — collisions
+    # with an existing GoC merge the two cohorts at write time.
+    renames: dict[str, str] = {}
+    for old, new in (goc_renames or {}).items():
+        old_s = (old or "").strip()
+        new_s = (new or "").strip()
+        if not old_s or not new_s:
+            continue
+        if old_s in renames:
+            warnings_out.append(
+                f"Rename for GoC '{old_s}' specified more than once; "
+                f"keeping the first ('{renames[old_s]}')."
+            )
+            continue
+        renames[old_s] = new_s
+    if renames:
+        found_old = {e["GOC"] for e in master} | set(goc_list)
+        for old_s in renames:
+            if old_s not in found_old:
+                warnings_out.append(
+                    f"Rename source GoC '{old_s}' is not in the input "
+                    "list — nothing to rename for this entry."
+                )
+        for e in master:
+            if e["GOC"] in renames:
+                e["GOC"] = renames[e["GOC"]]
+        seen: set[str] = set()
+        renamed_goc_list: list[str] = []
+        for g in goc_list:
+            new_name = renames.get(g, g)
+            if new_name in seen:
+                continue
+            seen.add(new_name)
+            renamed_goc_list.append(new_name)
+        goc_list = renamed_goc_list
+
     exclude = {g.strip() for g in (gocs_to_exclude or []) if g and g.strip()}
     if exclude:
         master = [e for e in master if e["GOC"] not in exclude]
@@ -622,6 +662,7 @@ def create_mp_model_point(
         "columns": MP_MODEL_POINT_HEADERS,
         "goc_list": filtered_goc_list,
         "goc_cohort_pairs": pairs,
+        "warnings": warnings_out,
     }
 
 
