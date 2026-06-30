@@ -787,6 +787,87 @@ def test_run_phase1_fills_cohort_year_gaps(tmp_path: Path) -> None:
     assert by_year[2025][7] == -80.0
 
 
+def test_run_phase1_aligns_min_cohort_year_across_groups(
+    tmp_path: Path,
+) -> None:
+    """The oldest cohort year is aligned between @Closing (year file)
+    and @Opening (year-1 file): a cohort present only in the year file
+    gets a synthetic zero row in the year-1 file too. Mirrors the
+    user's IT05RRIPOOL case (2018 present @Closing but absent from
+    @Opening)."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+
+    # Current-year (2025) file: GoC X has cohorts 2018..2025.
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    for i, y in enumerate(range(2018, 2026), start=2):
+        ws.cell(row=i, column=1, value="X")
+        ws.cell(row=i, column=2, value=y)
+        ws.cell(row=i, column=4, value=10.0)
+        ws.cell(row=i, column=5, value=5.0)
+    wb.save(ceded_curr)
+
+    # Previous-year (2024) file: X has cohorts 2019..2024 — 2018 is
+    # missing on this side.
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    for i, y in enumerate(range(2019, 2025), start=2):
+        ws.cell(row=i, column=1, value="X")
+        ws.cell(row=i, column=2, value=y)
+        ws.cell(row=i, column=4, value=8.0)
+        ws.cell(row=i, column=5, value=4.0)
+    wb.save(ceded_prev)
+
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("X", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+
+    mp_rows = _read_csv(result["outputs"][0])
+    closing_years = sorted([
+        r[3] for r in mp_rows[1:] if r[2] == "X@Closing"
+    ])
+    opening_years = sorted([
+        r[3] for r in mp_rows[1:] if r[2] == "X@Opening"
+    ])
+
+    # @Closing: 2018..2025 (real). @Opening: aligned floor at 2018, up to 2024.
+    assert closing_years == list(range(2018, 2026))
+    assert opening_years == list(range(2018, 2025))
+
+    # The synthetic 2018 @Opening row has zero values.
+    row_2018_opening = next(
+        r for r in mp_rows[1:]
+        if r[2] == "X@Opening" and r[3] == 2018
+    )
+    assert row_2018_opening[7] == 0
+    assert row_2018_opening[9] == 0
+
+
 def test_run_phase1_autofills_previous_year(tmp_path: Path) -> None:
     """The auto-fill applies to the previous-year file too: a non-zero
     GoC that is present in the current-year file but absent from the

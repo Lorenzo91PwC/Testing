@@ -667,14 +667,18 @@ def create_mp_model_point(
             })
 
     # Cohort-year gap fill: inside every ``(ANNO_RIFERIMENTO, GoC)`` group
-    # the accident-year range from the oldest to the newest year must be
-    # contiguous. Years missing in the input are added with zero
-    # sinistri/riserva, so MP_ModelPoint emits a row for every cohort
-    # between the min and the max and ``goc_cohort_pairs`` carries the
-    # full set of cohorts to Astra. Only non-zero GoCs are filled (the
-    # all-zero exclusion rule above still wins). Pre-horizon years
-    # produced by the fill are folded into the ``min_year`` row at emit
-    # time as before.
+    # the accident-year range must be contiguous, AND the oldest cohort
+    # year considered for a given GoC must be the same across all of
+    # its groups (``@Closing`` and ``@Opening``). The floor is therefore
+    # the per-GoC minimum across every group; the ceiling stays the
+    # group's own max (so ``@Opening`` keeps stopping at ``year - 1``
+    # and ``@Closing`` keeps reaching ``year``). Years missing in the
+    # input are added with zero sinistri/riserva, so MP_ModelPoint
+    # emits a row for every cohort in that range and
+    # ``goc_cohort_pairs`` carries the full set to Astra. Only
+    # non-zero GoCs are filled (the all-zero exclusion rule above
+    # still wins). Pre-horizon years produced by the fill are folded
+    # into the ``min_year`` row at emit time as before.
     group_years: dict[tuple[int, str], set[int]] = {}
     for entry in master:
         goc = entry["GOC"]
@@ -682,10 +686,20 @@ def create_mp_model_point(
             continue
         key = (entry["ANNO_RIFERIMENTO"], goc)
         group_years.setdefault(key, set()).add(int(entry["ANNO"]))
+    goc_min_year: dict[str, int] = {}
+    for (_anno_rif, goc), years in group_years.items():
+        if not years:
+            continue
+        candidate = min(years)
+        cur = goc_min_year.get(goc)
+        if cur is None or candidate < cur:
+            goc_min_year[goc] = candidate
     for (anno_rif, goc), years in group_years.items():
         if not years:
             continue
-        for y in range(min(years), max(years) + 1):
+        floor = goc_min_year[goc]
+        ceiling = max(years)
+        for y in range(floor, ceiling + 1):
             if y in years:
                 continue
             master.append({
