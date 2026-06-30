@@ -637,6 +637,28 @@ def create_mp_model_point(
     }
     filtered_goc_list = [g for g in goc_list if g in nonzero]
 
+    # Ensure every non-zero GoC has an analysis-year row coming from the
+    # current-year file (``ANNO == year`` and ``ANNO_RIFERIMENTO ==
+    # year``). When that row is missing in the input we synthesize a
+    # zero one, so MP_ModelPoint always emits a ``@Closing`` line for
+    # accident year ``year`` and the cohort pairs handed to Astra
+    # always include ``(GoC, year)``. The all-zero filter above is
+    # respected: GoCs without a single non-zero row anywhere stay out.
+    existing_current_year_gocs = {
+        e["GOC"] for e in master
+        if e["ANNO_RIFERIMENTO"] == year and int(e["ANNO"]) == year
+    }
+    for goc in filtered_goc_list:
+        if goc in existing_current_year_gocs:
+            continue
+        master.append({
+            "GOC": goc,
+            "ANNO": year,
+            "SINISTRI": 0.0,
+            "RISERVA_SINISTRI": 0.0,
+            "ANNO_RIFERIMENTO": year,
+        })
+
     # Unique (GoC, ANNO) pairs across all source files, restricted to the
     # non-zero GoC set and preserving first-seen order. Same shape as
     # the dicts produced by ``extract_unique_goc_cohort_pairs``, so that

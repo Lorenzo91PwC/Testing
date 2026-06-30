@@ -649,6 +649,120 @@ def test_run_phase1_rename_then_exclude(tmp_path: Path) -> None:
     assert gocs_in_lob == {"Property"}
 
 
+def test_run_phase1_autofills_analysis_year(tmp_path: Path) -> None:
+    """A non-zero GoC missing the analysis-year row gets a synthetic
+    zero row so MP_ModelPoint @Closing and the cohort pairs always
+    include the analysis year."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+
+    # Current-year (2025) file: only ``Motor`` has a 2025 row; we
+    # deliberately leave ``Liability`` out of the 2025 file so the
+    # auto-fill kicks in for it.
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+
+    # Previous-year file carries ``Liability`` (non-zero in 2024 only).
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor", "Liability"],
+        year=2024, sinistri=80.0, riserva=40.0,
+    )
+
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [
+            ("GOC", "Aggregation1", "Aggregation2"),
+            ("Motor", "Agg1_Motor", "Agg2_Motor"),
+            ("Liability", "Agg1_Liab", "Agg2_Liab"),
+        ],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+
+    # Cohort pairs include (Liability, 2025) even though Liability had
+    # no 2025 row in the 2025 file.
+    pairs_set = {(p["goc"], p["year"]) for p in result["goc_cohort_pairs"]}
+    assert ("Liability", 2025) in pairs_set
+    assert ("Liability", 2024) in pairs_set
+
+    # MP_ModelPoint has a (Liability, 2025) @Closing row with zeros.
+    mp_rows = _read_csv(result["outputs"][0])
+    liab_2025 = [
+        r for r in mp_rows[1:]
+        if r[1] == "Liability2025" and r[2] == "Liability@Closing"
+    ]
+    assert len(liab_2025) == 1
+    # EAXA_Reserve (idx 7) = riserva = 0, Claims_Paid (idx 9) = sinistri = 0
+    assert liab_2025[0][7] == 0
+    assert liab_2025[0][9] == 0
+
+
+def test_run_phase1_no_autofill_for_all_zero_gocs(tmp_path: Path) -> None:
+    """The all-zero exclusion rule still wins: a GoC that has only
+    zero rows everywhere is dropped and the analysis-year row is NOT
+    auto-filled for it."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor", "Empty"], year=2025,
+        sinistri=0.0, riserva=0.0,  # both zero in 2025 file
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    # ``Motor`` is non-zero in 2024 so it survives; ``Empty`` is zero
+    # in 2024 too.
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    ws.cell(row=2, column=1, value="Motor")
+    ws.cell(row=2, column=2, value=2024)
+    ws.cell(row=2, column=4, value=80.0)
+    ws.cell(row=2, column=5, value=40.0)
+    ws.cell(row=3, column=1, value="Empty")
+    ws.cell(row=3, column=2, value=2024)
+    ws.cell(row=3, column=4, value=0.0)
+    ws.cell(row=3, column=5, value=0.0)
+    wb.save(ceded_prev)
+
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("Motor", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+
+    cohort_gocs = {p["goc"] for p in result["goc_cohort_pairs"]}
+    # ``Empty`` is excluded entirely by the all-zero filter — no auto-fill.
+    assert "Empty" not in cohort_gocs
+    # ``Motor`` survives and has an auto-filled (Motor, 2025).
+    assert ("Motor", 2025) in {(p["goc"], p["year"]) for p in result["goc_cohort_pairs"]}
+
+
 def test_run_phase1_rename_unknown_old_warning(tmp_path: Path) -> None:
     """Rename sources not in the input list surface as a warning but
     the run still completes."""

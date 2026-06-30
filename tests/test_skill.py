@@ -1551,7 +1551,12 @@ def test_create_mp_model_point_folds_pre_horizon_years(tmp_path: Path) -> None:
 def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
     tmp_path: Path,
 ) -> None:
-    """If min_year has no native data, the folded row is still emitted."""
+    """If min_year has no native data, the folded row is still emitted.
+
+    Since the analysis-year auto-fill rule was added, this GoC also
+    gets a synthetic ``Accident_Year=year`` row with zeros (rows are
+    emitted newest-first within each ``(anno_rif, goc)`` group).
+    """
     curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
     _build_input_sunrise_rows_fixture(
         curr,
@@ -1573,9 +1578,13 @@ def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
     )
 
     rows = _read_csv(output)
-    assert len(rows) == 2  # header + 1 row at 2010
-    assert rows[1][3] == 2010
-    assert rows[1][9] == 30.0  # 10 + 20
+    assert len(rows) == 3  # header + auto-filled 2025 row + folded 2010 row
+    # Newest first inside the group
+    assert rows[1][3] == 2025
+    assert rows[1][9] == 0  # Claims_Paid = 0 on the synthetic row
+    assert rows[1][7] == 0  # EAXA_Reserve = 0 on the synthetic row
+    assert rows[2][3] == 2010
+    assert rows[2][9] == 30.0  # 10 + 20
 
 
 def test_create_mp_model_point_missing_transcodifica_entry_is_empty(
