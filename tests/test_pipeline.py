@@ -709,6 +709,84 @@ def test_run_phase1_autofills_analysis_year(tmp_path: Path) -> None:
     assert liab_2025[0][9] == 0
 
 
+def test_run_phase1_fills_cohort_year_gaps(tmp_path: Path) -> None:
+    """Missing accident years between the oldest and the newest cohort
+    inside a single (ANNO_RIFERIMENTO, GoC) group are gap-filled with
+    zero rows. Mirrors the user's IT05RRIHVIC case (data at 2021 and
+    2025 only, expect 2022/2023/2024 to appear with zeros)."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+
+    # Current-year file: GoC X with cohort data at 2021 and 2025 only
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    ws.cell(row=2, column=1, value="X")
+    ws.cell(row=2, column=2, value=2021)
+    ws.cell(row=2, column=4, value=100.0)
+    ws.cell(row=2, column=5, value=50.0)
+    ws.cell(row=3, column=1, value="X")
+    ws.cell(row=3, column=2, value=2025)
+    ws.cell(row=3, column=4, value=200.0)
+    ws.cell(row=3, column=5, value=80.0)
+    wb.save(ceded_curr)
+
+    # Previous-year file: X with 2024 data (single row, no gaps to fill).
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["X"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("X", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+
+    # Cohort pairs include every year between 2021 and 2025.
+    x_pairs = {p["year"] for p in result["goc_cohort_pairs"] if p["goc"] == "X"}
+    assert {2021, 2022, 2023, 2024, 2025}.issubset(x_pairs)
+
+    # MP_ModelPoint @Closing has exactly the contiguous 2021..2025 range
+    # for X (the 2024 file produces a single @Opening row that's
+    # separate from this assertion).
+    mp_rows = _read_csv(result["outputs"][0])
+    x_closing_years = sorted([
+        r[3] for r in mp_rows[1:]
+        if r[2] == "X@Closing"
+    ])
+    assert x_closing_years == [2021, 2022, 2023, 2024, 2025]
+
+    # Gap-filled years (2022/2023/2024) carry zeros; real years keep
+    # their negated values.
+    by_year = {
+        r[3]: r for r in mp_rows[1:]
+        if r[2] == "X@Closing"
+    }
+    for y in (2022, 2023, 2024):
+        assert by_year[y][7] == 0
+        assert by_year[y][9] == 0
+    assert by_year[2021][9] == -100.0
+    assert by_year[2021][7] == -50.0
+    assert by_year[2025][9] == -200.0
+    assert by_year[2025][7] == -80.0
+
+
 def test_run_phase1_autofills_previous_year(tmp_path: Path) -> None:
     """The auto-fill applies to the previous-year file too: a non-zero
     GoC that is present in the current-year file but absent from the

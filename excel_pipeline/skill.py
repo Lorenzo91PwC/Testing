@@ -666,6 +666,36 @@ def create_mp_model_point(
                 "ANNO_RIFERIMENTO": anno_rif,
             })
 
+    # Cohort-year gap fill: inside every ``(ANNO_RIFERIMENTO, GoC)`` group
+    # the accident-year range from the oldest to the newest year must be
+    # contiguous. Years missing in the input are added with zero
+    # sinistri/riserva, so MP_ModelPoint emits a row for every cohort
+    # between the min and the max and ``goc_cohort_pairs`` carries the
+    # full set of cohorts to Astra. Only non-zero GoCs are filled (the
+    # all-zero exclusion rule above still wins). Pre-horizon years
+    # produced by the fill are folded into the ``min_year`` row at emit
+    # time as before.
+    group_years: dict[tuple[int, str], set[int]] = {}
+    for entry in master:
+        goc = entry["GOC"]
+        if goc not in nonzero:
+            continue
+        key = (entry["ANNO_RIFERIMENTO"], goc)
+        group_years.setdefault(key, set()).add(int(entry["ANNO"]))
+    for (anno_rif, goc), years in group_years.items():
+        if not years:
+            continue
+        for y in range(min(years), max(years) + 1):
+            if y in years:
+                continue
+            master.append({
+                "GOC": goc,
+                "ANNO": y,
+                "SINISTRI": 0.0,
+                "RISERVA_SINISTRI": 0.0,
+                "ANNO_RIFERIMENTO": anno_rif,
+            })
+
     # Unique (GoC, ANNO) pairs across all source files, restricted to the
     # non-zero GoC set and preserving first-seen order. Same shape as
     # the dicts produced by ``extract_unique_goc_cohort_pairs``, so that

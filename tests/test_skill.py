@@ -1540,14 +1540,23 @@ def test_create_mp_model_point_folds_pre_horizon_years(tmp_path: Path) -> None:
     )
 
     rows = _read_csv(output)
-    # Two rows: 2025 (latest) and 2010 (folded pre-horizon)
-    assert len(rows) == 3  # header + 2 data rows
-    assert rows[1][3] == 2025  # Accident_Year of newest row
-    assert rows[2][3] == 2010  # Accident_Year of oldest row
-    # 2010 row: 5 + (10+20+30) = 65 sinistri, 0.5 + (1+2+3) = 6.5 riserva
-    # (then negated when written to MP_ModelPoint).
-    assert rows[2][9] == -65.0  # Claims_Paid
-    assert rows[2][7] == -6.5  # EAXA_Reserve
+    data_rows = rows[1:]
+    # Gap-fill emits every accident year in the horizon (2010..2025).
+    years = sorted({r[3] for r in data_rows})
+    assert years == list(range(2010, 2026))
+    # 2010 row carries the folded pre-horizon values, negated.
+    row_2010 = next(r for r in data_rows if r[3] == 2010)
+    assert row_2010[9] == -65.0  # 5 + (10+20+30)
+    assert row_2010[7] == -6.5  # 0.5 + (1+2+3)
+    # 2025 keeps the original (negated) in-horizon value.
+    row_2025 = next(r for r in data_rows if r[3] == 2025)
+    assert row_2025[9] == -100.0
+    assert row_2025[7] == -200.0
+    # 2011..2024 are gap-filled zero rows.
+    for y in range(2011, 2025):
+        r = next(r for r in data_rows if r[3] == y)
+        assert r[9] == 0
+        assert r[7] == 0
 
 
 def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
@@ -1580,14 +1589,22 @@ def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
     )
 
     rows = _read_csv(output)
-    assert len(rows) == 3  # header + auto-filled 2025 row + folded 2010 row
-    # Newest first inside the group
-    assert rows[1][3] == 2025
-    assert rows[1][9] == 0  # Claims_Paid = 0 on the synthetic row
-    assert rows[1][7] == 0  # EAXA_Reserve = 0 on the synthetic row
-    assert rows[2][3] == 2010
-    # Sum (10 + 20) then negated by the MP_ModelPoint sign convention.
-    assert rows[2][9] == -30.0
+    data_rows = rows[1:]
+    # Gap-fill emits every accident year in the horizon (2010..2025).
+    years = sorted({r[3] for r in data_rows})
+    assert years == list(range(2010, 2026))
+    # 2010 row carries the folded pre-horizon (negated): 10 + 20 = 30.
+    row_2010 = next(r for r in data_rows if r[3] == 2010)
+    assert row_2010[9] == -30.0
+    # 2025 is the auto-filled zero row.
+    row_2025 = next(r for r in data_rows if r[3] == 2025)
+    assert row_2025[9] == 0
+    assert row_2025[7] == 0
+    # 2011..2024 are gap-filled zero rows.
+    for y in range(2011, 2025):
+        r = next(r for r in data_rows if r[3] == y)
+        assert r[9] == 0
+        assert r[7] == 0
 
 
 def test_create_mp_model_point_inverts_sign_of_claim_values(
