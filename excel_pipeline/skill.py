@@ -560,6 +560,7 @@ def create_mp_model_point(
     transcodifica_path: str,
     output_path: str,
     year: int,
+    gocs_to_exclude: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create ``MP_ModelPoint.csv`` in two clear stages.
 
@@ -586,6 +587,10 @@ def create_mp_model_point(
     """
     transcodifica = _load_transcodifica_table(transcodifica_path)
     goc_list, master = build_input_sunrise_master_table(sources)
+    exclude = {g.strip() for g in (gocs_to_exclude or []) if g and g.strip()}
+    if exclude:
+        master = [e for e in master if e["GOC"] not in exclude]
+        goc_list = [g for g in goc_list if g not in exclude]
     nonzero = {
         e["GOC"] for e in master
         if e["SINISTRI"] != 0.0 or e["RISERVA_SINISTRI"] != 0.0
@@ -1202,10 +1207,15 @@ def update_mp_goc(
     December). Idempotent: rerunning with the same inputs produces the
     same output.
     """
-    if business_type not in MP_GOC_BUSINESS_TYPE_VALUES:
+    # ``business_type`` is reserved for future use (the UI no longer
+    # collects it); column P is driven by column R alone. We still
+    # accept the old values for backward compatibility but no longer
+    # require them — anything else (including ``""``) is a no-op.
+    if business_type and business_type not in MP_GOC_BUSINESS_TYPE_VALUES:
         raise ValueError(
             "business_type must be one of "
-            f"{sorted(MP_GOC_BUSINESS_TYPE_VALUES)}, got {business_type!r}"
+            f"{sorted(MP_GOC_BUSINESS_TYPE_VALUES)} or '', "
+            f"got {business_type!r}"
         )
     if semester == 1:
         mmdd = "0630"

@@ -117,7 +117,7 @@ with col_main:
     )
 
     st.subheader("2. Analysis parameters")
-    col_year, col_sem, col_type = st.columns(3)
+    col_year, col_sem = st.columns(2)
     with col_year:
         year = st.number_input(
             "Year",
@@ -132,12 +132,6 @@ with col_main:
             options=[1, 2],
             horizontal=True,
             format_func=lambda s: "HY" if s == 1 else "FY",
-        )
-    with col_type:
-        business_type = st.radio(
-            "Business type",
-            options=["Diretto", "Ceduto"],
-            horizontal=True,
         )
     st.caption(
         "Entities to analyze — pick from the list or type a new one in "
@@ -165,6 +159,23 @@ with col_main:
             f"ignored: {invalid_entries}",
             icon="⚠️",
         )
+
+    st.caption(
+        "GOC not to be considered — type an 11-char GOC name "
+        "(e.g. `IT05PABPPLE`) and press Enter to add. Every cohort "
+        "year for the listed GoCs is removed from the run."
+    )
+    gocs_to_exclude_raw = st.multiselect(
+        "GOC not to be considered",
+        options=[],
+        default=[],
+        accept_new_options=True,
+        label_visibility="collapsed",
+        key="sunrise_gocs_to_exclude",
+    )
+    gocs_to_exclude = [
+        str(g).strip() for g in gocs_to_exclude_raw if str(g).strip()
+    ]
 
     run_clicked = st.button(
         "▶ Run pipeline",
@@ -206,6 +217,7 @@ with col_main:
                         entities=parsed_entities,
                         year=int(year),
                         semester=int(semester),
+                        gocs_to_exclude=gocs_to_exclude,
                     )
                     for out in phase1_result["outputs"]:
                         st.write(f"✅ Phase 1 → `{out.name}`")

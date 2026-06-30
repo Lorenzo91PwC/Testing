@@ -130,7 +130,7 @@ uploaded = st.file_uploader(
 )
 
 st.subheader("2. Analysis parameters")
-col_year, col_sem, col_type = st.columns(3)
+col_year, col_sem = st.columns(2)
 with col_year:
     year = st.number_input(
         "Year",
@@ -145,12 +145,6 @@ with col_sem:
         options=[1, 2],
         horizontal=True,
         format_func=lambda s: "HY" if s == 1 else "FY",
-    )
-with col_type:
-    business_type = st.radio(
-        "Business type",
-        options=["Diretto", "Ceduto"],
-        horizontal=True,
     )
 st.caption(
     "Entities to analyze — pick from the list or type a new one in "
@@ -178,6 +172,23 @@ if invalid_entries:
         f"ignored: {invalid_entries}",
         icon="⚠️",
     )
+
+st.caption(
+    "GOC not to be considered — type an 11-char GOC name "
+    "(e.g. `IT05PABPPLE`) and press Enter to add. Every cohort year "
+    "for the listed GoCs is removed from the Astra outputs."
+)
+gocs_to_exclude_raw = st.multiselect(
+    "GOC not to be considered",
+    options=[],
+    default=[],
+    accept_new_options=True,
+    label_visibility="collapsed",
+    key="astra_gocs_to_exclude",
+)
+gocs_to_exclude = [
+    str(g).strip() for g in gocs_to_exclude_raw if str(g).strip()
+]
 
 col_close_curve, col_open_curve = st.columns(2)
 with col_close_curve:
@@ -302,12 +313,13 @@ if run_clicked and uploaded and parsed_entities and sunrise_ready:
                     entities=parsed_entities,
                     year=int(year),
                     semester=int(semester),
-                    business_type=business_type,
+                    business_type="",  # reserved for future use; UI removed
                     health_perimeter_gocs=health_perimeter_gocs,
                     actuarial_aom_impact_pairs=aom_impact_pairs,
                     closing_curve_name=closing_curve_name.strip(),
                     opening_curve_name=opening_curve_name.strip(),
                     goc_cohort_pairs=sunrise_pairs,
+                    gocs_to_exclude=gocs_to_exclude,
                 )
                 for out in outputs:
                     st.write(f"✅ → `{out.name}`")
