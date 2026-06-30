@@ -709,6 +709,63 @@ def test_run_phase1_autofills_analysis_year(tmp_path: Path) -> None:
     assert liab_2025[0][9] == 0
 
 
+def test_run_phase1_autofills_previous_year(tmp_path: Path) -> None:
+    """The auto-fill applies to the previous-year file too: a non-zero
+    GoC that is present in the current-year file but absent from the
+    previous-year file still gets a synthetic ``@Opening`` row with
+    Accident_Year=year-1 and zero values."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    # Current-year file: both Motor and Liability with 2025 data.
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor", "Liability"],
+        year=2025, sinistri=100.0, riserva=50.0,
+    )
+    # Previous-year file: only Motor. Liability is absent.
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [
+            ("GOC", "Aggregation1", "Aggregation2"),
+            ("Motor", "A", "B"),
+            ("Liability", "C", "D"),
+        ],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+
+    # Cohort pairs include (Liability, 2024) even though Liability was
+    # missing from the 2024 file.
+    pairs_set = {(p["goc"], p["year"]) for p in result["goc_cohort_pairs"]}
+    assert ("Liability", 2024) in pairs_set
+    assert ("Liability", 2025) in pairs_set
+
+    # MP_ModelPoint @Opening row for Liability with Accident_Year=2024
+    # and zero claim values.
+    mp_rows = _read_csv(result["outputs"][0])
+    liab_opening = [
+        r for r in mp_rows[1:]
+        if r[1] == "Liability2024" and r[2] == "Liability@Opening"
+    ]
+    assert len(liab_opening) == 1
+    # Sign-flipped, but zero stays zero
+    assert liab_opening[0][7] == 0  # EAXA_Reserve
+    assert liab_opening[0][9] == 0  # Claims_Paid
+
+
 def test_run_phase1_no_autofill_for_all_zero_gocs(tmp_path: Path) -> None:
     """The all-zero exclusion rule still wins: a GoC that has only
     zero rows everywhere is dropped and the analysis-year row is NOT

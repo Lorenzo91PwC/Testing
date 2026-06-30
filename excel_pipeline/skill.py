@@ -640,27 +640,31 @@ def create_mp_model_point(
     }
     filtered_goc_list = [g for g in goc_list if g in nonzero]
 
-    # Ensure every non-zero GoC has an analysis-year row coming from the
-    # current-year file (``ANNO == year`` and ``ANNO_RIFERIMENTO ==
-    # year``). When that row is missing in the input we synthesize a
-    # zero one, so MP_ModelPoint always emits a ``@Closing`` line for
-    # accident year ``year`` and the cohort pairs handed to Astra
-    # always include ``(GoC, year)``. The all-zero filter above is
-    # respected: GoCs without a single non-zero row anywhere stay out.
-    existing_current_year_gocs = {
-        e["GOC"] for e in master
-        if e["ANNO_RIFERIMENTO"] == year and int(e["ANNO"]) == year
+    # For every ``ANNO_RIFERIMENTO`` actually present in the inputs
+    # (typically the analysis year and the previous year — the two
+    # Sunrise files), ensure every non-zero GoC has a row with
+    # ``ANNO == ANNO_RIFERIMENTO``. A missing row would mean an empty
+    # ``@Closing`` (when anno_rif == year) or ``@Opening`` (anno_rif ==
+    # year - 1) for that GoC, plus a missing cohort pair handed to
+    # Astra. When the row is missing we synthesize a zero one. The
+    # all-zero filter above is respected: GoCs without a single
+    # non-zero row anywhere stay out.
+    existing_pairs = {
+        (e["ANNO_RIFERIMENTO"], e["GOC"]) for e in master
+        if int(e["ANNO"]) == e["ANNO_RIFERIMENTO"]
     }
-    for goc in filtered_goc_list:
-        if goc in existing_current_year_gocs:
-            continue
-        master.append({
-            "GOC": goc,
-            "ANNO": year,
-            "SINISTRI": 0.0,
-            "RISERVA_SINISTRI": 0.0,
-            "ANNO_RIFERIMENTO": year,
-        })
+    anno_rif_present = {e["ANNO_RIFERIMENTO"] for e in master}
+    for anno_rif in anno_rif_present:
+        for goc in filtered_goc_list:
+            if (anno_rif, goc) in existing_pairs:
+                continue
+            master.append({
+                "GOC": goc,
+                "ANNO": anno_rif,
+                "SINISTRI": 0.0,
+                "RISERVA_SINISTRI": 0.0,
+                "ANNO_RIFERIMENTO": anno_rif,
+            })
 
     # Unique (GoC, ANNO) pairs across all source files, restricted to the
     # non-zero GoC set and preserving first-seen order. Same shape as
