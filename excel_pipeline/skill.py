@@ -536,12 +536,15 @@ def _emit_mp_model_point_rows(
         for acc_year in sorted(in_horizon.keys(), reverse=True):
             sinistri, riserva = in_horizon[acc_year]
             goc_id = f"{goc}{acc_year}"
+            # Convention: MP_ModelPoint stores claim outflows with the
+            # opposite sign of the input (positive input → negative
+            # output, and vice versa). Zero stays zero.
             rows.append([
                 f"{goc_id}@{anno_rif}", goc_id, f"{goc}@{observation_suffix}",
                 acc_year, anno_rif,
                 agg1, agg2,
-                riserva, 0,
-                sinistri, 0,
+                -riserva, 0,
+                -sinistri, 0,
             ])
     return rows
 

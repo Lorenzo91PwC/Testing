@@ -1492,23 +1492,24 @@ def test_create_mp_model_point_happy_path(tmp_path: Path) -> None:
     rows = _read_csv(output)
     # Header
     assert rows[0] == tuple(result["columns"])
+    # MP_ModelPoint inverts the sign of EAXA_Reserve and Claims_Paid.
     # Current-year rows: 2025 then 2024 (descending), @Closing
     assert rows[1] == (
         "IT05PABPPLE2025@2025", "IT05PABPPLE2025", "IT05PABPPLE@Closing",
         2025, 2025, "Commercial P&C", "PAA_Direct",
-        200.0, 0, 100.0, 0,
+        -200.0, 0, -100.0, 0,
     )
-    # 2024 is summed: 50+25=75 sinistri, 75+25=100 riserva
+    # 2024 is summed: 50+25=75 sinistri, 75+25=100 riserva (then negated)
     assert rows[2] == (
         "IT05PABPPLE2024@2025", "IT05PABPPLE2024", "IT05PABPPLE@Closing",
         2024, 2025, "Commercial P&C", "PAA_Direct",
-        100.0, 0, 75.0, 0,
+        -100.0, 0, -75.0, 0,
     )
     # Previous-year file row: 2024 only, @Opening
     assert rows[3] == (
         "IT05PABPPLE2024@2024", "IT05PABPPLE2024", "IT05PABPPLE@Opening",
         2024, 2024, "Commercial P&C", "PAA_Direct",
-        90.0, 0, 80.0, 0,
+        -90.0, 0, -80.0, 0,
     )
 
 
@@ -1544,8 +1545,9 @@ def test_create_mp_model_point_folds_pre_horizon_years(tmp_path: Path) -> None:
     assert rows[1][3] == 2025  # Accident_Year of newest row
     assert rows[2][3] == 2010  # Accident_Year of oldest row
     # 2010 row: 5 + (10+20+30) = 65 sinistri, 0.5 + (1+2+3) = 6.5 riserva
-    assert rows[2][9] == 65.0  # Claims_Paid
-    assert rows[2][7] == 6.5  # EAXA_Reserve
+    # (then negated when written to MP_ModelPoint).
+    assert rows[2][9] == -65.0  # Claims_Paid
+    assert rows[2][7] == -6.5  # EAXA_Reserve
 
 
 def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
@@ -1584,7 +1586,42 @@ def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
     assert rows[1][9] == 0  # Claims_Paid = 0 on the synthetic row
     assert rows[1][7] == 0  # EAXA_Reserve = 0 on the synthetic row
     assert rows[2][3] == 2010
-    assert rows[2][9] == 30.0  # 10 + 20
+    # Sum (10 + 20) then negated by the MP_ModelPoint sign convention.
+    assert rows[2][9] == -30.0
+
+
+def test_create_mp_model_point_inverts_sign_of_claim_values(
+    tmp_path: Path,
+) -> None:
+    """MP_ModelPoint flips the sign of every claim value: positive input
+    becomes negative output and negative input becomes positive output.
+    """
+    curr = tmp_path / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_rows_fixture(
+        curr,
+        [
+            ("IT05PABPPLE", 2025, "INTERNA", 100.0, 50.0),
+            ("IT05PABPPLE", 2024, "INTERNA", -25.0, -10.0),
+        ],
+    )
+    transcodifica = tmp_path / "3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(transcodifica, [])
+    output = tmp_path / "MP_ModelPoint.csv"
+
+    create_mp_model_point(
+        sources=[(str(curr), 2025)],
+        transcodifica_path=str(transcodifica),
+        output_path=str(output),
+        year=2025,
+    )
+
+    rows = _read_csv(output)
+    by_acc_year = {row[3]: row for row in rows[1:]}
+    # Claims_Paid (idx 9) and EAXA_Reserve (idx 7) are flipped
+    assert by_acc_year[2025][9] == -100.0
+    assert by_acc_year[2025][7] == -50.0
+    assert by_acc_year[2024][9] == 25.0
+    assert by_acc_year[2024][7] == 10.0
 
 
 def test_create_mp_model_point_missing_transcodifica_entry_is_empty(
