@@ -8,7 +8,6 @@ locally.
 """
 from __future__ import annotations
 
-import os
 import re
 import shutil
 from datetime import datetime
@@ -87,8 +86,6 @@ ENTITIES: list[tuple[int, str]] = [
     (19, "NOBIS"),
 ]
 
-HAS_API_KEY = bool(os.getenv("ANTHROPIC_API_KEY"))
-
 st.set_page_config(
     page_title="Sunrise Input Builder",
     page_icon="📊",
@@ -99,7 +96,6 @@ st.set_page_config(
 # Session state
 # ---------------------------------------------------------------------------
 st.session_state.setdefault("sunrise_run_id", None)
-st.session_state.setdefault("chat_history", [])
 
 # ---------------------------------------------------------------------------
 # UI
@@ -107,264 +103,219 @@ st.session_state.setdefault("chat_history", [])
 st.title("📊 Sunrise Input Builder")
 st.caption("Local pipeline that prepares Sunrise input files — data never leaves this machine.")
 
-col_main, col_chat = st.columns([2, 1])
+st.warning(
+    "**Warning!** The following outputs must be provided or modified by "
+    "the user:\n\n"
+    "- `IFRs17Rates.csv`",
+    icon="⚠️",
+)
 
-with col_main:
+st.subheader("1. Upload input files")
+uploaded = st.file_uploader(
+    "Excel or CSV files",
+    type=["xlsx", "xlsm", "csv"],
+    accept_multiple_files=True,
+)
+
+st.subheader("2. Analysis parameters")
+col_year, col_sem = st.columns(2)
+with col_year:
+    year = st.number_input(
+        "Year",
+        min_value=2000,
+        max_value=2100,
+        value=datetime.now().year,
+        step=1,
+    )
+with col_sem:
+    semester = st.radio(
+        "Semester",
+        options=[1, 2],
+        horizontal=True,
+        format_func=lambda s: "HY" if s == 1 else "FY",
+    )
+st.caption(
+    "Entities to analyze — pick from the list or type a new one in "
+    "the format `X - name` (e.g. `99 - CUSTOM`) and press Enter."
+)
+raw_entity_selection = st.multiselect(
+    "Entities to analyze",
+    options=ENTITIES,
+    default=[ENTITIES[1]],
+    format_func=lambda e: f"{e[0]} — {e[1]}",
+    accept_new_options=True,
+    label_visibility="collapsed",
+)
+parsed_entities: list[tuple[int, str]] = []
+invalid_entries: list[str] = []
+for item in raw_entity_selection:
+    parsed = _parse_entity_selection(item)
+    if parsed is None:
+        invalid_entries.append(str(item))
+    else:
+        parsed_entities.append(parsed)
+if invalid_entries:
     st.warning(
-        "**Warning!** The following outputs must be provided or modified by "
-        "the user:\n\n"
-        "- `IFRs17Rates.csv`",
+        "These entries don't match the `X - name` format and were "
+        f"ignored: {invalid_entries}",
         icon="⚠️",
     )
 
-    st.subheader("1. Upload input files")
-    uploaded = st.file_uploader(
-        "Excel or CSV files",
-        type=["xlsx", "xlsm", "csv"],
-        accept_multiple_files=True,
-    )
-
-    st.subheader("2. Analysis parameters")
-    col_year, col_sem = st.columns(2)
-    with col_year:
-        year = st.number_input(
-            "Year",
-            min_value=2000,
-            max_value=2100,
-            value=datetime.now().year,
-            step=1,
-        )
-    with col_sem:
-        semester = st.radio(
-            "Semester",
-            options=[1, 2],
-            horizontal=True,
-            format_func=lambda s: "HY" if s == 1 else "FY",
-        )
+col_exclude, col_rename = st.columns(2)
+with col_exclude:
     st.caption(
-        "Entities to analyze — pick from the list or type a new one in "
-        "the format `X - name` (e.g. `99 - CUSTOM`) and press Enter."
+        "**GOC not to be considered** — type an 11-char GOC name "
+        "(e.g. `IT05PABPPLE`) and press Enter to add. Every "
+        "cohort year for the listed GoCs is removed from the run."
     )
-    raw_entity_selection = st.multiselect(
-        "Entities to analyze",
-        options=ENTITIES,
-        default=[ENTITIES[1]],
-        format_func=lambda e: f"{e[0]} — {e[1]}",
+    gocs_to_exclude_raw = st.multiselect(
+        "GOC not to be considered",
+        options=[],
+        default=[],
         accept_new_options=True,
         label_visibility="collapsed",
+        key="sunrise_gocs_to_exclude",
     )
-    parsed_entities: list[tuple[int, str]] = []
-    invalid_entries: list[str] = []
-    for item in raw_entity_selection:
-        parsed = _parse_entity_selection(item)
-        if parsed is None:
-            invalid_entries.append(str(item))
-        else:
-            parsed_entities.append(parsed)
-    if invalid_entries:
-        st.warning(
-            "These entries don't match the `X - name` format and were "
-            f"ignored: {invalid_entries}",
-            icon="⚠️",
-        )
-
-    col_exclude, col_rename = st.columns(2)
-    with col_exclude:
-        st.caption(
-            "**GOC not to be considered** — type an 11-char GOC name "
-            "(e.g. `IT05PABPPLE`) and press Enter to add. Every "
-            "cohort year for the listed GoCs is removed from the run."
-        )
-        gocs_to_exclude_raw = st.multiselect(
-            "GOC not to be considered",
-            options=[],
-            default=[],
-            accept_new_options=True,
-            label_visibility="collapsed",
-            key="sunrise_gocs_to_exclude",
-        )
-        gocs_to_exclude = [
-            str(g).strip() for g in gocs_to_exclude_raw if str(g).strip()
-        ]
-    with col_rename:
-        st.caption(
-            "**GOC to rename** — every occurrence of *Old name* in "
-            "the GoC list read from the inputs is replaced by *New "
-            "name* before exclusions are applied. Rename sources not "
-            "found in the input list are surfaced as a warning."
-        )
-        rename_df = st.data_editor(
-            pd.DataFrame([{"Old name": "", "New name": ""}]),
-            num_rows="dynamic",
-            hide_index=True,
-            column_config={
-                "Old name": st.column_config.TextColumn(
-                    "Old name",
-                    help="GOC name as it appears in the input files.",
-                ),
-                "New name": st.column_config.TextColumn(
-                    "New name",
-                    help="Replacement name written to the outputs.",
-                ),
-            },
-            key="sunrise_goc_renames_editor",
-        )
-        goc_renames: dict[str, str] = {}
-        for _, row in rename_df.iterrows():
-            old = str(row.get("Old name") or "").strip()
-            new = str(row.get("New name") or "").strip()
-            if old and new:
-                goc_renames[old] = new
-
-    run_clicked = st.button(
-        "▶ Run pipeline",
-        type="primary",
-        disabled=not (uploaded and parsed_entities),
+    gocs_to_exclude = [
+        str(g).strip() for g in gocs_to_exclude_raw if str(g).strip()
+    ]
+with col_rename:
+    st.caption(
+        "**GOC to rename** — every occurrence of *Old name* in "
+        "the GoC list read from the inputs is replaced by *New "
+        "name* before exclusions are applied. Rename sources not "
+        "found in the input list are surfaced as a warning."
     )
-    if run_clicked and uploaded and parsed_entities:
-        run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        run_dir = RUNS_DIR / run_id
-        inputs_dir = run_dir / "inputs"
-        inputs_dir.mkdir(parents=True)
-        input_paths: list[Path] = []
-        for f in uploaded:
-            p = inputs_dir / f.name
-            p.write_bytes(f.getvalue())
-            input_paths.append(p)
+    rename_df = st.data_editor(
+        pd.DataFrame([{"Old name": "", "New name": ""}]),
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "Old name": st.column_config.TextColumn(
+                "Old name",
+                help="GOC name as it appears in the input files.",
+            ),
+            "New name": st.column_config.TextColumn(
+                "New name",
+                help="Replacement name written to the outputs.",
+            ),
+        },
+        key="sunrise_goc_renames_editor",
+    )
+    goc_renames: dict[str, str] = {}
+    for _, row in rename_df.iterrows():
+        old = str(row.get("Old name") or "").strip()
+        new = str(row.get("New name") or "").strip()
+        if old and new:
+            goc_renames[old] = new
 
-        report = validate_sunrise_inputs(
-            input_paths, year=int(year), semester=int(semester)
-        )
-        _render_validation_report(report)
-        # Always persist the report next to the run, so the user can audit
-        # both successful runs and blocked runs after the fact.
-        report.save(run_dir / "validation.json")
+run_clicked = st.button(
+    "▶ Run pipeline",
+    type="primary",
+    disabled=not (uploaded and parsed_entities),
+)
+if run_clicked and uploaded and parsed_entities:
+    run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    run_dir = RUNS_DIR / run_id
+    inputs_dir = run_dir / "inputs"
+    inputs_dir.mkdir(parents=True)
+    input_paths: list[Path] = []
+    for f in uploaded:
+        p = inputs_dir / f.name
+        p.write_bytes(f.getvalue())
+        input_paths.append(p)
 
-        if report.is_blocking:
-            # Errors already rendered above; nothing else to do.
-            pass
-        else:
-            st.session_state.sunrise_run_id = run_id
-            st.session_state.chat_history = []
+    report = validate_sunrise_inputs(
+        input_paths, year=int(year), semester=int(semester)
+    )
+    _render_validation_report(report)
+    # Always persist the report next to the run, so the user can audit
+    # both successful runs and blocked runs after the fact.
+    report.save(run_dir / "validation.json")
 
-            with st.status("Running pipeline...", expanded=True) as status:
-                try:
-                    status.update(label="Phase 1 in progress...")
-                    phase1_result = run_phase1(
-                        input_paths=input_paths,
-                        run_dir=run_dir,
-                        entities=parsed_entities,
-                        year=int(year),
-                        semester=int(semester),
-                        gocs_to_exclude=gocs_to_exclude,
-                        goc_renames=goc_renames,
-                    )
-                    for w in phase1_result.get("warnings", []):
-                        st.warning(w, icon="⚠️")
-                    for out in phase1_result["outputs"]:
-                        st.write(f"✅ Phase 1 → `{out.name}`")
-
-                    # Expose to the Astra page via session_state:
-                    # - (GoC, accident_year) pairs, replacing the legacy
-                    #   AAI_P&C_Ceded upload that used to derive them;
-                    # - the Health-perimeter GoCs read from the
-                    #   Transcodifica file (column D == 'H'), replacing
-                    #   the manual multiselect on the Astra page.
-                    st.session_state.sunrise_goc_cohort_pairs = (
-                        phase1_result["goc_cohort_pairs"]
-                    )
-                    st.session_state.sunrise_health_perimeter_gocs = (
-                        phase1_result["health_perimeter_gocs"]
-                    )
-
-                    status.update(label="Pipeline complete", state="complete")
-                except Exception as e:
-                    status.update(label=f"Failed: {e}", state="error")
-                    st.exception(e)
-
-    # Show files produced in the current run
-    if st.session_state.sunrise_run_id:
-        st.subheader("3. Run outputs")
-        run_dir = RUNS_DIR / st.session_state.sunrise_run_id
-        files = list_run_files(run_dir)
-        if not files:
-            st.info("No output files yet.")
-        for f in files:
-            st.download_button(
-                label=f"⬇ {f.name}",
-                data=f.read_bytes(),
-                file_name=f.name,
-                mime=CSV_MIME,
-                key=str(f),
-            )
-
-        st.subheader("4. Save all outputs to folder")
-        saved_folder = load_pref("sunrise_output_folder", "")
-        output_folder = st.text_input(
-            "Output folder path (remembered between sessions)",
-            value=saved_folder,
-            placeholder=r"e.g. C:\Users\loren\Sunrise_outputs",
-            key="sunrise_output_folder_input",
-        )
-        if output_folder != saved_folder:
-            save_pref("sunrise_output_folder", output_folder)
-
-        save_all = st.button(
-            "📥 Save all Sunrise outputs to that folder",
-            disabled=not (output_folder and files),
-            key="sunrise_save_all",
-        )
-        if save_all and output_folder and files:
-            try:
-                dest = Path(output_folder).expanduser()
-                dest.mkdir(parents=True, exist_ok=True)
-                copied: list[str] = []
-                for f in files:
-                    shutil.copy2(f, dest / f.name)
-                    copied.append(f.name)
-                st.success(
-                    f"✅ Saved {len(copied)} file(s) to `{dest}`."
-                )
-            except Exception as e:  # noqa: BLE001
-                st.error(f"❌ Failed to save outputs: {e}")
-
-with col_chat:
-    st.subheader("💬 Ad-hoc edits")
-    if not HAS_API_KEY:
-        st.info(
-            "Ad-hoc edits require an Anthropic API key. Add "
-            "`ANTHROPIC_API_KEY` to `.env` to enable this panel. The main "
-            "pipeline works without it."
-        )
-    elif st.session_state.sunrise_run_id is None:
-        st.info("Run the pipeline first, then ask for changes here.")
+    if report.is_blocking:
+        # Errors already rendered above; nothing else to do.
+        pass
     else:
-        from excel_pipeline.orchestrator import run_ad_hoc
+        st.session_state.sunrise_run_id = run_id
 
-        st.caption(f"Editing run `{st.session_state.sunrise_run_id}`")
+        with st.status("Running pipeline...", expanded=True) as status:
+            try:
+                status.update(label="Phase 1 in progress...")
+                phase1_result = run_phase1(
+                    input_paths=input_paths,
+                    run_dir=run_dir,
+                    entities=parsed_entities,
+                    year=int(year),
+                    semester=int(semester),
+                    gocs_to_exclude=gocs_to_exclude,
+                    goc_renames=goc_renames,
+                )
+                for w in phase1_result.get("warnings", []):
+                    st.warning(w, icon="⚠️")
+                for out in phase1_result["outputs"]:
+                    st.write(f"✅ Phase 1 → `{out.name}`")
 
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
+                # Expose to the Astra page via session_state:
+                # - (GoC, accident_year) pairs, replacing the legacy
+                #   AAI_P&C_Ceded upload that used to derive them;
+                # - the Health-perimeter GoCs read from the
+                #   Transcodifica file (column D == 'H'), replacing
+                #   the manual multiselect on the Astra page.
+                st.session_state.sunrise_goc_cohort_pairs = (
+                    phase1_result["goc_cohort_pairs"]
+                )
+                st.session_state.sunrise_health_perimeter_gocs = (
+                    phase1_result["health_perimeter_gocs"]
+                )
 
-        if prompt := st.chat_input("Describe a change..."):
-            st.session_state.chat_history.append(
-                {"role": "user", "content": prompt}
+                status.update(label="Pipeline complete", state="complete")
+            except Exception as e:
+                status.update(label=f"Failed: {e}", state="error")
+                st.exception(e)
+
+# Show files produced in the current run
+if st.session_state.sunrise_run_id:
+    st.subheader("3. Run outputs")
+    run_dir = RUNS_DIR / st.session_state.sunrise_run_id
+    files = list_run_files(run_dir)
+    if not files:
+        st.info("No output files yet.")
+    for f in files:
+        st.download_button(
+            label=f"⬇ {f.name}",
+            data=f.read_bytes(),
+            file_name=f.name,
+            mime=CSV_MIME,
+            key=str(f),
+        )
+
+    st.subheader("4. Save all outputs to folder")
+    saved_folder = load_pref("sunrise_output_folder", "")
+    output_folder = st.text_input(
+        "Output folder path (remembered between sessions)",
+        value=saved_folder,
+        placeholder=r"e.g. C:\Users\loren\Sunrise_outputs",
+        key="sunrise_output_folder_input",
+    )
+    if output_folder != saved_folder:
+        save_pref("sunrise_output_folder", output_folder)
+
+    save_all = st.button(
+        "📥 Save all Sunrise outputs to that folder",
+        disabled=not (output_folder and files),
+        key="sunrise_save_all",
+    )
+    if save_all and output_folder and files:
+        try:
+            dest = Path(output_folder).expanduser()
+            dest.mkdir(parents=True, exist_ok=True)
+            copied: list[str] = []
+            for f in files:
+                shutil.copy2(f, dest / f.name)
+                copied.append(f.name)
+            st.success(
+                f"✅ Saved {len(copied)} file(s) to `{dest}`."
             )
-            with st.chat_message("user"):
-                st.write(prompt)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Working..."):
-                    try:
-                        response = run_ad_hoc(
-                            request=prompt,
-                            run_dir=RUNS_DIR / st.session_state.sunrise_run_id,
-                        )
-                    except Exception as e:
-                        response = f"Error: {e}"
-                    st.write(response)
-                    st.session_state.chat_history.append(
-                        {"role": "assistant", "content": response}
-                    )
-            st.rerun()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"❌ Failed to save outputs: {e}")
