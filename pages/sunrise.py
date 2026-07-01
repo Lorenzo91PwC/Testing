@@ -161,53 +161,51 @@ if invalid_entries:
         icon="⚠️",
     )
 
-col_exclude, col_rename = st.columns(2)
-with col_exclude:
-    st.caption(
-        "**GOC not to be considered** — type an 11-char GOC name "
-        "(e.g. `IT05PABPPLE`) and press Enter to add. Every "
-        "cohort year for the listed GoCs is removed from the run."
-    )
-    gocs_to_exclude_raw = st.multiselect(
-        "GOC not to be considered",
-        options=[],
-        default=[],
-        accept_new_options=True,
-        label_visibility="collapsed",
-        key="sunrise_gocs_to_exclude",
-    )
-    gocs_to_exclude = [
-        str(g).strip() for g in gocs_to_exclude_raw if str(g).strip()
-    ]
-with col_rename:
-    st.caption(
-        "**GOC to rename** — every occurrence of *Old name* in "
-        "the GoC list read from the inputs is replaced by *New "
-        "name* before exclusions are applied. Rename sources not "
-        "found in the input list are surfaced as a warning."
-    )
-    rename_df = st.data_editor(
-        pd.DataFrame([{"Old name": "", "New name": ""}]),
-        num_rows="dynamic",
-        hide_index=True,
-        column_config={
-            "Old name": st.column_config.TextColumn(
-                "Old name",
-                help="GOC name as it appears in the input files.",
-            ),
-            "New name": st.column_config.TextColumn(
-                "New name",
-                help="Replacement name written to the outputs.",
-            ),
-        },
-        key="sunrise_goc_renames_editor",
-    )
-    goc_renames: dict[str, str] = {}
-    for _, row in rename_df.iterrows():
-        old = str(row.get("Old name") or "").strip()
-        new = str(row.get("New name") or "").strip()
-        if old and new:
-            goc_renames[old] = new
+st.caption(
+    "**GOC not to be considered** — type an 11-char GOC name "
+    "(e.g. `IT05PABPPLE`) and press Enter to add. Every "
+    "cohort year for the listed GoCs is removed from the run."
+)
+gocs_to_exclude_raw = st.multiselect(
+    "GOC not to be considered",
+    options=[],
+    default=[],
+    accept_new_options=True,
+    label_visibility="collapsed",
+    key="sunrise_gocs_to_exclude",
+)
+gocs_to_exclude = [
+    str(g).strip() for g in gocs_to_exclude_raw if str(g).strip()
+]
+
+st.caption(
+    "**GOC to rename** — every occurrence of *Old name* in "
+    "the GoC list read from the inputs is replaced by *New "
+    "name* before exclusions are applied. Rename sources not "
+    "found in the input list are surfaced as a warning."
+)
+rename_df = st.data_editor(
+    pd.DataFrame([{"Old name": "", "New name": ""}]),
+    num_rows="dynamic",
+    hide_index=True,
+    column_config={
+        "Old name": st.column_config.TextColumn(
+            "Old name",
+            help="GOC name as it appears in the input files.",
+        ),
+        "New name": st.column_config.TextColumn(
+            "New name",
+            help="Replacement name written to the outputs.",
+        ),
+    },
+    key="sunrise_goc_renames_editor",
+)
+goc_renames: dict[str, str] = {}
+for _, row in rename_df.iterrows():
+    old = str(row.get("Old name") or "").strip()
+    new = str(row.get("New name") or "").strip()
+    if old and new:
+        goc_renames[old] = new
 
 run_clicked = st.button(
     "▶ Run pipeline",
