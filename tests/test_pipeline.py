@@ -796,11 +796,15 @@ def test_run_phase1_fills_cohort_year_gaps(tmp_path: Path) -> None:
 def test_run_phase1_pre_horizon_fold_lands_on_year_minus_14(
     tmp_path: Path,
 ) -> None:
-    """New fold rule: pre-horizon SINISTRI/RISERVA are summed into the
-    row at ``anno_rif - 14`` (2011 for YE25 @Closing / 2010 for @Opening),
-    while the row at ``anno_rif - 15`` (2010 for @Closing / 2009 for
-    @Opening) is emitted as a zero padding row to preserve the previous
-    analysis year's horizon boundary."""
+    """Fold rule differs between the two groups:
+
+    - ``@Closing`` (``anno_rif = year``): 16-year horizon. Fold at
+      ``year - 14`` (2011 for YE25). When the fold triggers, a zero
+      padding row at ``year - 15`` (2010) is also emitted.
+    - ``@Opening`` (``anno_rif = year - 1``): 15-year horizon. Fold at
+      ``anno_rif - 14`` = ``year - 15`` (2010 for YE25). NO padding
+      row at ``anno_rif - 15`` (2009), even if the fold triggers.
+    """
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
 
@@ -823,12 +827,24 @@ def test_run_phase1_pre_horizon_fold_lands_on_year_minus_14(
         ws.cell(row=i, column=5, value=r)
     wb.save(ceded_curr)
 
-    # Previous-year (2024) file: any non-zero data at 2020 so we have both
-    # groups populated; the specific values are irrelevant to the fold test.
+    # Previous-year (2024) file: pre-horizon at 2005 (30/15) plus in-horizon
+    # at 2020 (10/5). This exercises the @Opening fold path too.
     ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
-    _build_input_sunrise_workbook(
-        ceded_prev, ["X"], year=2020, sinistri=10.0, riserva=5.0,
-    )
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    for i, (y, s, r) in enumerate(
+        [(2005, 30.0, 15.0), (2020, 10.0, 5.0)], start=2,
+    ):
+        ws.cell(row=i, column=1, value="X")
+        ws.cell(row=i, column=2, value=y)
+        ws.cell(row=i, column=4, value=s)
+        ws.cell(row=i, column=5, value=r)
+    wb.save(ceded_prev)
 
     transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
     _write_csv(
@@ -850,7 +866,9 @@ def test_run_phase1_pre_horizon_fold_lands_on_year_minus_14(
     closing = {r[3]: r for r in mp_rows[1:] if r[2] == "X@Closing"}
     opening = {r[3]: r for r in mp_rows[1:] if r[2] == "X@Opening"}
 
-    # @Closing (anno_rif = 2025): fold_year = 2011, min_horizon = 2010.
+    # @Closing (anno_rif = 2025): fold_year = 2011, padding at 2010.
+    # 16-year horizon 2010..2025.
+    assert sorted(closing.keys()) == list(range(2010, 2026))
     # Pre-horizon sum (2008 + 2009) → 150/75 into 2011 (negated in output).
     assert closing[2011][9] == -150.0
     assert closing[2011][7] == -75.0
@@ -861,10 +879,17 @@ def test_run_phase1_pre_horizon_fold_lands_on_year_minus_14(
     assert closing[2020][9] == -200.0
     assert closing[2020][7] == -80.0
 
-    # @Opening (anno_rif = 2024): fold_year = 2010, min_horizon = 2009.
-    # No pre-horizon data on this side (X only has 2020 in the prev file),
-    # so no fold and no padding row at 2009 is added.
+    # @Opening (anno_rif = 2024): fold_year = 2010. 15-year horizon
+    # 2010..2024 — the row at anno_rif - 15 = 2009 is NEVER emitted,
+    # even though the fold triggers on this side too.
+    assert sorted(opening.keys()) == list(range(2010, 2025))
     assert 2009 not in opening
+    # Pre-horizon (2005) folded into 2010 → 30/15 (negated in output).
+    assert opening[2010][9] == -30.0
+    assert opening[2010][7] == -15.0
+    # In-horizon real value at 2020 keeps its (negated) value.
+    assert opening[2020][9] == -10.0
+    assert opening[2020][7] == -5.0
 
 
 def test_run_phase1_aligns_min_cohort_year_across_groups(
