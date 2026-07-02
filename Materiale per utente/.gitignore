@@ -1,0 +1,14 @@
+# Runtime-generated: Python interpreter downloaded on first launch
+python/
+get-pip.py
+python.zip
+
+# Per-run outputs
+runs/
+
+# Persistent per-machine user preferences
+user_prefs.json
+
+# Python cache
+__pycache__/
+*.pyc
