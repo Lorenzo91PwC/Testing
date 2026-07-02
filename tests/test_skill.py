@@ -1574,19 +1574,27 @@ def test_create_mp_model_point_folds_pre_horizon_years(tmp_path: Path) -> None:
 
     rows = _read_csv(output)
     data_rows = rows[1:]
-    # Gap-fill emits every accident year in the horizon (2010..2025).
+    # Gap-fill + fold emit every accident year in the horizon (2010..2025).
     years = sorted({r[3] for r in data_rows})
     assert years == list(range(2010, 2026))
-    # 2010 row carries the folded pre-horizon values, negated.
+    # Fold sink moved to 2011 (= year - 14). 2011 carries the summed
+    # pre-horizon values (2007..2010 in this fixture) plus the 2010
+    # in-fixture value: 5 + (10+20+30) = 65 sinistri, 0.5 + (1+2+3) = 6.5
+    # riserva, all negated.
+    row_2011 = next(r for r in data_rows if r[3] == 2011)
+    assert row_2011[9] == -65.0
+    assert row_2011[7] == -6.5
+    # 2010 stays in the horizon as a zero padding row (the previous fold
+    # boundary is preserved for cross-run alignment).
     row_2010 = next(r for r in data_rows if r[3] == 2010)
-    assert row_2010[9] == -65.0  # 5 + (10+20+30)
-    assert row_2010[7] == -6.5  # 0.5 + (1+2+3)
+    assert row_2010[9] == 0
+    assert row_2010[7] == 0
     # 2025 keeps the original (negated) in-horizon value.
     row_2025 = next(r for r in data_rows if r[3] == 2025)
     assert row_2025[9] == -100.0
     assert row_2025[7] == -200.0
-    # 2011..2024 are gap-filled zero rows.
-    for y in range(2011, 2025):
+    # 2012..2024 are gap-filled zero rows.
+    for y in range(2012, 2025):
         r = next(r for r in data_rows if r[3] == y)
         assert r[9] == 0
         assert r[7] == 0
@@ -1623,18 +1631,23 @@ def test_create_mp_model_point_folds_pre_horizon_creates_min_year_row(
 
     rows = _read_csv(output)
     data_rows = rows[1:]
-    # Gap-fill emits every accident year in the horizon (2010..2025).
+    # Gap-fill + fold emit every accident year in the horizon (2010..2025).
     years = sorted({r[3] for r in data_rows})
     assert years == list(range(2010, 2026))
-    # 2010 row carries the folded pre-horizon (negated): 10 + 20 = 30.
+    # Fold sink is 2011 (= year - 14) and carries the pre-horizon sum
+    # (10 + 20 = 30) — negated.
+    row_2011 = next(r for r in data_rows if r[3] == 2011)
+    assert row_2011[9] == -30.0
+    # 2010 is a zero padding row (previous fold boundary).
     row_2010 = next(r for r in data_rows if r[3] == 2010)
-    assert row_2010[9] == -30.0
+    assert row_2010[9] == 0
+    assert row_2010[7] == 0
     # 2025 is the auto-filled zero row.
     row_2025 = next(r for r in data_rows if r[3] == 2025)
     assert row_2025[9] == 0
     assert row_2025[7] == 0
-    # 2011..2024 are gap-filled zero rows.
-    for y in range(2011, 2025):
+    # 2012..2024 are gap-filled zero rows.
+    for y in range(2012, 2025):
         r = next(r for r in data_rows if r[3] == y)
         assert r[9] == 0
         assert r[7] == 0

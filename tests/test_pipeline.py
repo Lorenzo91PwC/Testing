@@ -793,6 +793,80 @@ def test_run_phase1_fills_cohort_year_gaps(tmp_path: Path) -> None:
     assert by_year[2025][7] == -80.0
 
 
+def test_run_phase1_pre_horizon_fold_lands_on_year_minus_14(
+    tmp_path: Path,
+) -> None:
+    """New fold rule: pre-horizon SINISTRI/RISERVA are summed into the
+    row at ``anno_rif - 14`` (2011 for YE25 @Closing / 2010 for @Opening),
+    while the row at ``anno_rif - 15`` (2010 for @Closing / 2009 for
+    @Opening) is emitted as a zero padding row to preserve the previous
+    analysis year's horizon boundary."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+
+    # Current-year (2025) file: pre-horizon at 2008 (100/50) and 2009 (50/25),
+    # plus an in-horizon value at 2020 (200/80).
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    for i, (y, s, r) in enumerate(
+        [(2008, 100.0, 50.0), (2009, 50.0, 25.0), (2020, 200.0, 80.0)], start=2,
+    ):
+        ws.cell(row=i, column=1, value="X")
+        ws.cell(row=i, column=2, value=y)
+        ws.cell(row=i, column=4, value=s)
+        ws.cell(row=i, column=5, value=r)
+    wb.save(ceded_curr)
+
+    # Previous-year (2024) file: any non-zero data at 2020 so we have both
+    # groups populated; the specific values are irrelevant to the fold test.
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["X"], year=2020, sinistri=10.0, riserva=5.0,
+    )
+
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("X", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+
+    mp_rows = _read_csv(result["outputs"][0])
+    closing = {r[3]: r for r in mp_rows[1:] if r[2] == "X@Closing"}
+    opening = {r[3]: r for r in mp_rows[1:] if r[2] == "X@Opening"}
+
+    # @Closing (anno_rif = 2025): fold_year = 2011, min_horizon = 2010.
+    # Pre-horizon sum (2008 + 2009) → 150/75 into 2011 (negated in output).
+    assert closing[2011][9] == -150.0
+    assert closing[2011][7] == -75.0
+    # 2010 padding row is emitted with zeros.
+    assert closing[2010][9] == 0
+    assert closing[2010][7] == 0
+    # In-horizon real value at 2020 keeps its (negated) value.
+    assert closing[2020][9] == -200.0
+    assert closing[2020][7] == -80.0
+
+    # @Opening (anno_rif = 2024): fold_year = 2010, min_horizon = 2009.
+    # No pre-horizon data on this side (X only has 2020 in the prev file),
+    # so no fold and no padding row at 2009 is added.
+    assert 2009 not in opening
+
+
 def test_run_phase1_aligns_min_cohort_year_across_groups(
     tmp_path: Path,
 ) -> None:

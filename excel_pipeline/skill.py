@@ -472,11 +472,21 @@ def _emit_mp_model_point_rows(
 ) -> list[list[Any]]:
     """Build the MP_ModelPoint data rows from the master aggregated table.
 
-    Horizon is ``[year - 15, year]`` for rows whose ``ANNO_RIFERIMENTO``
-    equals the analysis year (``@Closing``) and ``[year - 15, year - 1]``
-    for rows whose ``ANNO_RIFERIMENTO`` equals the previous year
-    (``@Opening``). Pre-horizon years are summed into the oldest-year
-    row, creating it if not already present.
+    Horizon (16-year depth) per group:
+
+    - ``@Closing`` (``ANNO_RIFERIMENTO == year``): ``[year - 15, year]``.
+    - ``@Opening`` (``ANNO_RIFERIMENTO == year - 1``): ``[year - 16, year - 1]``.
+
+    Pre-horizon fold: for each ``(ANNO_RIFERIMENTO, GoC)`` group, the
+    SINISTRI/RISERVA of every accident year strictly older than
+    ``fold_year = ANNO_RIFERIMENTO - 14`` are summed into the row at
+    ``fold_year`` (creating it if not already present). When the fold
+    actually triggers (i.e. at least one non-zero value contributed to
+    the sum), the row at ``min_horizon = ANNO_RIFERIMENTO - 15`` is
+    also emitted with zero values as a padding row — this keeps the
+    boundary of the previous analysis-year's series present in the new
+    horizon so ``@Closing`` and ``@Opening`` stay comparable across
+    consecutive runs. If nothing folds, the padding row is not added.
 
     GoCs whose ``SINISTRI`` and ``RISERVA_SINISTRI`` are zero on every
     row of the master table (across all source files and all years) are
@@ -485,7 +495,6 @@ def _emit_mp_model_point_rows(
     rows: list[list[Any]] = []
     if not master:
         return rows
-    min_year = year - 15
 
     # First pass: which GoCs have at least one non-zero SINISTRI or
     # RISERVA_SINISTRI value somewhere in the master? GoCs that are all
@@ -513,6 +522,13 @@ def _emit_mp_model_point_rows(
         else:
             continue
 
+        # Fold at anno_rif - 14 (was anno_rif - 15). The row at
+        # anno_rif - 15 becomes a zero padding row when the fold
+        # triggers, so the previous analysis year's fold boundary
+        # keeps appearing in the horizon.
+        fold_year = anno_rif - 14
+        min_horizon_year = anno_rif - 15
+
         in_horizon: dict[int, list[float]] = {}
         pre_horizon_sin = 0.0
         pre_horizon_ris = 0.0
@@ -520,16 +536,19 @@ def _emit_mp_model_point_rows(
             acc_year = entry["ANNO"]
             sinistri = entry["SINISTRI"]
             riserva = entry["RISERVA_SINISTRI"]
-            if acc_year < min_year:
+            if acc_year < fold_year:
                 pre_horizon_sin += sinistri
                 pre_horizon_ris += riserva
             elif acc_year <= max_year:
                 in_horizon[acc_year] = [sinistri, riserva]
 
         if pre_horizon_sin != 0.0 or pre_horizon_ris != 0.0:
-            bucket = in_horizon.setdefault(min_year, [0.0, 0.0])
+            bucket = in_horizon.setdefault(fold_year, [0.0, 0.0])
             bucket[0] += pre_horizon_sin
             bucket[1] += pre_horizon_ris
+            # Preserve the anno_rif - 15 row as a zero padding row so
+            # it doesn't disappear when the fold moves to fold_year.
+            in_horizon.setdefault(min_horizon_year, [0.0, 0.0])
 
         agg1, agg2 = transcodifica.get(goc, (None, None))
 
