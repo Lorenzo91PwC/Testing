@@ -892,6 +892,76 @@ def test_run_phase1_pre_horizon_fold_lands_on_year_minus_14(
     assert opening[2020][7] == -5.0
 
 
+def test_run_phase1_closing_padding_when_only_prev_reaches_year_minus_15(
+    tmp_path: Path,
+) -> None:
+    """@Closing must include a zero padding row at year - 15 whenever
+    the GoC has data at or below year - 15 anywhere in the master —
+    even if the current-year file itself has nothing pre-horizon.
+    Mirrors the user's IT05RRIMTPL case: curr starts at 2020, prev has
+    cohorts 2010..2023 → both @Closing and @Opening must start at 2010.
+    """
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+
+    # curr (2025): X at 2020 only — no accident year below year - 14.
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["X"], year=2020, sinistri=100.0, riserva=50.0,
+    )
+
+    # prev (2024): X has cohorts 2010..2023 all non-zero.
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input_Sunrise"
+    ws.cell(row=1, column=1, value="GoC")
+    ws.cell(row=1, column=2, value="Year")
+    ws.cell(row=1, column=4, value="Sinistri")
+    ws.cell(row=1, column=5, value="Riserva")
+    for i, y in enumerate(range(2010, 2024), start=2):
+        ws.cell(row=i, column=1, value="X")
+        ws.cell(row=i, column=2, value=y)
+        ws.cell(row=i, column=4, value=10.0)
+        ws.cell(row=i, column=5, value=5.0)
+    wb.save(ceded_prev)
+
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("X", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+
+    mp_rows = _read_csv(result["outputs"][0])
+    closing = {r[3]: r for r in mp_rows[1:] if r[2] == "X@Closing"}
+    opening = {r[3]: r for r in mp_rows[1:] if r[2] == "X@Opening"}
+
+    # Both groups start at 2010; @Closing has 16 years, @Opening has 15.
+    assert sorted(closing.keys()) == list(range(2010, 2026))
+    assert sorted(opening.keys()) == list(range(2010, 2025))
+
+    # @Closing[2010] is a zero padding row (no real 2010 data in curr,
+    # no @Closing pre-horizon fold to place there).
+    assert closing[2010][7] == 0
+    assert closing[2010][9] == 0
+    # @Closing[2020] keeps the real (negated) value.
+    assert closing[2020][7] == -50.0
+    assert closing[2020][9] == -100.0
+    # @Opening[2010] carries the real (negated) 2010 value from prev.
+    assert opening[2010][7] == -5.0
+    assert opening[2010][9] == -10.0
+
+
 def test_run_phase1_aligns_min_cohort_year_across_groups(
     tmp_path: Path,
 ) -> None:

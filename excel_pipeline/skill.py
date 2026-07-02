@@ -475,21 +475,27 @@ def _emit_mp_model_point_rows(
     Horizon per group:
 
     - ``@Closing`` (``ANNO_RIFERIMENTO == year``): ``[year - 15, year]``
-      (16-year depth).
-    - ``@Opening`` (``ANNO_RIFERIMENTO == year - 1``): ``[year - 15, year - 1]``
-      (15-year depth).
+      (16-year depth) when the GoC has any accident year at or below
+      ``year - 15`` anywhere in the master; otherwise
+      ``[per_goc_min, year]``.
+    - ``@Opening`` (``ANNO_RIFERIMENTO == year - 1``): ``[year - 15,
+      year - 1]`` (15-year depth) when the GoC has any accident year
+      at or below ``year - 15``; otherwise ``[per_goc_min, year - 1]``.
 
     Pre-horizon fold: for each ``(ANNO_RIFERIMENTO, GoC)`` group, the
     SINISTRI/RISERVA of every accident year strictly older than
     ``fold_year = ANNO_RIFERIMENTO - 14`` are summed into the row at
     ``fold_year`` (creating it if not already present).
 
-    Only ``@Closing`` also gets a zero padding row at
-    ``ANNO_RIFERIMENTO - 15`` when the fold triggers — this keeps the
-    previous analysis-year's fold boundary present in the current
-    horizon so consecutive runs stay comparable. The ``@Opening`` group
-    does NOT receive the padding row: its horizon stops at
-    ``fold_year = year - 15``.
+    Only ``@Closing`` also gets a zero padding row at ``year - 15``
+    whenever the GoC has any accident year at or below ``year - 15``
+    in any group — including cases where the ``@Closing`` group itself
+    has no pre-horizon data of its own. This keeps ``@Closing`` and
+    ``@Opening`` aligned on the same oldest accident year: whenever
+    ``@Opening``'s 15-year horizon reaches ``year - 15``, ``@Closing``
+    reaches it too (as a zero padding row) and the fold aggregate
+    lives on ``year - 14`` instead. The ``@Opening`` group never
+    receives a padding row.
 
     GoCs whose ``SINISTRI`` and ``RISERVA_SINISTRI`` are zero on every
     row of the master table (across all source files and all years) are
@@ -506,6 +512,19 @@ def _emit_mp_model_point_rows(
     for entry in master:
         if entry["SINISTRI"] != 0.0 or entry["RISERVA_SINISTRI"] != 0.0:
             nonzero_gocs.add(entry["GOC"])
+
+    # Per-GoC minimum accident year across all groups (needed to decide
+    # whether @Closing has to emit a zero padding row at year - 15 to
+    # align its horizon with @Opening).
+    goc_min_present: dict[str, int] = {}
+    for entry in master:
+        goc = entry["GOC"]
+        if goc not in nonzero_gocs:
+            continue
+        acc_year = int(entry["ANNO"])
+        prev = goc_min_present.get(goc)
+        if prev is None or acc_year < prev:
+            goc_min_present[goc] = acc_year
 
     # Group by (ANNO_RIFERIMENTO, GOC) preserving insertion order.
     grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
@@ -526,9 +545,12 @@ def _emit_mp_model_point_rows(
             continue
 
         # Fold at anno_rif - 14 for both groups. Only @Closing (anno_rif
-        # == year) also gets a zero padding row at anno_rif - 15 so the
-        # previous analysis year's fold boundary keeps appearing in the
-        # horizon; @Opening's horizon stops at fold_year (15-year depth).
+        # == year) also gets a zero padding row at year - 15, whenever
+        # the GoC has any accident year at or below year - 15 anywhere
+        # in the master — so @Closing's horizon aligns with @Opening's
+        # oldest year even when the @Closing group has no pre-horizon
+        # data of its own. @Opening's horizon stops at fold_year
+        # (15-year depth) and never gets a padding row.
         fold_year = anno_rif - 14
 
         in_horizon: dict[int, list[float]] = {}
@@ -548,10 +570,17 @@ def _emit_mp_model_point_rows(
             bucket = in_horizon.setdefault(fold_year, [0.0, 0.0])
             bucket[0] += pre_horizon_sin
             bucket[1] += pre_horizon_ris
-            if anno_rif == year:
-                # Analysis-year group only: emit the anno_rif - 15 row
-                # as zero padding so it survives the fold shift.
-                in_horizon.setdefault(anno_rif - 15, [0.0, 0.0])
+
+        # @Closing padding at year - 15: whenever the GoC has data at
+        # or below year - 15 in any group. This handles the case where
+        # the current-year file has no pre-horizon values on its own
+        # but the previous-year file does — the two groups must still
+        # start at the same oldest accident year.
+        if (
+            anno_rif == year
+            and goc_min_present.get(goc, year) <= year - 15
+        ):
+            in_horizon.setdefault(year - 15, [0.0, 0.0])
 
         agg1, agg2 = transcodifica.get(goc, (None, None))
 
