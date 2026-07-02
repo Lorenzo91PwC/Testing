@@ -236,10 +236,8 @@ if run_clicked and uploaded and parsed_entities:
         pass
     else:
         st.session_state.sunrise_run_id = run_id
-
-        with st.status("Running pipeline...", expanded=True) as status:
-            try:
-                status.update(label="Phase 1 in progress...")
+        try:
+            with st.spinner("Running pipeline..."):
                 phase1_result = run_phase1(
                     input_paths=input_paths,
                     run_dir=run_dir,
@@ -249,28 +247,33 @@ if run_clicked and uploaded and parsed_entities:
                     gocs_to_exclude=gocs_to_exclude,
                     goc_renames=goc_renames,
                 )
-                for w in phase1_result.get("warnings", []):
-                    st.warning(w, icon="⚠️")
-                for out in phase1_result["outputs"]:
-                    st.write(f"✅ Phase 1 → `{out.name}`")
 
-                # Expose to the Astra page via session_state:
-                # - (GoC, accident_year) pairs, replacing the legacy
-                #   AAI_P&C_Ceded upload that used to derive them;
-                # - the Health-perimeter GoCs read from the
-                #   Transcodifica file (column D == 'H'), replacing
-                #   the manual multiselect on the Astra page.
-                st.session_state.sunrise_goc_cohort_pairs = (
-                    phase1_result["goc_cohort_pairs"]
-                )
-                st.session_state.sunrise_health_perimeter_gocs = (
-                    phase1_result["health_perimeter_gocs"]
-                )
+            # Warnings surface as top-level yellow banners so they can't
+            # get hidden inside a collapsed status box.
+            for w in phase1_result.get("warnings", []):
+                st.warning(w, icon="⚠️")
 
-                status.update(label="Pipeline complete", state="complete")
-            except Exception as e:
-                status.update(label=f"Failed: {e}", state="error")
-                st.exception(e)
+            st.success(
+                f"Pipeline complete — "
+                f"{len(phase1_result['outputs'])} file(s) prodotti.",
+                icon="✅",
+            )
+
+            # Expose to the Astra page via session_state:
+            # - (GoC, accident_year) pairs, replacing the legacy
+            #   AAI_P&C_Ceded upload that used to derive them;
+            # - the Health-perimeter GoCs read from the Transcodifica
+            #   file (column D == 'H'), replacing the manual
+            #   multiselect on the Astra page.
+            st.session_state.sunrise_goc_cohort_pairs = (
+                phase1_result["goc_cohort_pairs"]
+            )
+            st.session_state.sunrise_health_perimeter_gocs = (
+                phase1_result["health_perimeter_gocs"]
+            )
+        except Exception as e:
+            st.error(f"❌ Pipeline failed: {e}")
+            st.exception(e)
 
 # Show files produced in the current run
 if st.session_state.sunrise_run_id:
