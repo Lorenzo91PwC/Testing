@@ -99,11 +99,17 @@ start "" /B powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Start-Sleep -Seconds 4; Start-Process 'http://localhost:8501'"
 
 REM --- Step 6: launch Streamlit --------------------------------------------
+REM Headless mode is passed via env var rather than CLI flag: PowerShell's
+REM parser mangles `--server.headless=true` (splits at the `=`) when the
+REM command is run manually from PS. Env vars are consumed identically by
+REM both cmd and PowerShell, so this variant is safe in either shell.
+set "STREAMLIT_SERVER_HEADLESS=true"
+set "STREAMLIT_BROWSER_GATHER_USAGE_STATS=false"
 echo.
 echo Starting Sunrise + Astra Input Builder...
 echo (Close this window to stop the app.)
 echo.
-"%PY_EXE%" -m streamlit run app.py --server.headless=true
+"%PY_EXE%" -m streamlit run app.py
 set "STREAMLIT_EXIT=!ERRORLEVEL!"
 
 REM Keep the window open on non-zero exit so any traceback stays visible.
