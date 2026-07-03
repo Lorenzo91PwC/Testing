@@ -1,0 +1,9 @@
+# Streamlit configuration — kept in the project folder so it applies
+# regardless of the shell (cmd, PowerShell, Windows Terminal) or how the
+# app is launched. Any CLI flag or env var would be redundant.
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

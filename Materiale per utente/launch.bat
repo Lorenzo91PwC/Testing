@@ -94,15 +94,26 @@ if not exist "%MARKER%" (
     echo done > "%MARKER%"
 )
 
-REM --- Step 5: open the default browser once Streamlit is ready ------------
+REM --- Step 5: pre-populate Streamlit user credentials ---------------------
+REM Some Streamlit versions prompt for an email address the very first
+REM time they run for a given Windows user, blocking the terminal until
+REM something is typed. Writing an empty credentials.toml in advance
+REM suppresses that prompt entirely.
+if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" 2>nul
+if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
+    > "%USERPROFILE%\.streamlit\credentials.toml" echo [general]
+    >> "%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
+)
+
+REM --- Step 6: open the default browser once Streamlit is ready ------------
 start "" /B powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Start-Sleep -Seconds 4; Start-Process 'http://localhost:8501'"
 
-REM --- Step 6: launch Streamlit --------------------------------------------
-REM Headless mode is passed via env var rather than CLI flag: PowerShell's
-REM parser mangles `--server.headless=true` (splits at the `=`) when the
-REM command is run manually from PS. Env vars are consumed identically by
-REM both cmd and PowerShell, so this variant is safe in either shell.
+REM --- Step 7: launch Streamlit --------------------------------------------
+REM No CLI flags: the .streamlit\config.toml shipped in this folder already
+REM sets `server.headless = true` and `browser.gatherUsageStats = false`.
+REM Env vars are kept as a belt-and-suspenders fallback in case someone
+REM deletes the config file.
 set "STREAMLIT_SERVER_HEADLESS=true"
 set "STREAMLIT_BROWSER_GATHER_USAGE_STATS=false"
 echo.
