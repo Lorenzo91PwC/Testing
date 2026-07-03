@@ -59,11 +59,32 @@ if not exist "%PY_DIR%\Scripts\pip.exe" (
 )
 
 REM --- Step 4: install runtime dependencies (one-time) ---------------------
+REM The marker is written ONLY after we verify that streamlit is actually
+REM importable — that way a partially-failed install doesn't fool us at the
+REM next launch.
+if exist "%MARKER%" (
+    "%PY_EXE%" -c "import streamlit, openpyxl, pandas" 1>nul 2>nul
+    if !ERRORLEVEL! NEQ 0 (
+        echo Marker present but dependencies broken — reinstalling.
+        del "%MARKER%"
+    )
+)
+
 if not exist "%MARKER%" (
     echo Installing dependencies (one-time, may take a couple of minutes)...
     "%PY_EXE%" -m pip install --no-warn-script-location streamlit^>=1.30 openpyxl^>=3.1 pandas^>=2.0
     if !ERRORLEVEL! NEQ 0 (
+        echo.
         echo ERROR: Dependency installation failed. Check your internet connection.
+        pause
+        exit /b 1
+    )
+    REM Verify the install really worked before writing the marker.
+    "%PY_EXE%" -c "import streamlit, openpyxl, pandas" 1>nul 2>nul
+    if !ERRORLEVEL! NEQ 0 (
+        echo.
+        echo ERROR: Dependencies installed but Python cannot import them.
+        echo        Try deleting the "python" folder and rerun this launcher.
         pause
         exit /b 1
     )
@@ -80,5 +101,23 @@ echo Starting Sunrise + Astra Input Builder...
 echo (Close this window to stop the app.)
 echo.
 "%PY_EXE%" -m streamlit run app.py --server.headless=true
+set "STREAMLIT_EXIT=!ERRORLEVEL!"
+
+REM Keep the window open on non-zero exit so any traceback stays visible.
+if !STREAMLIT_EXIT! NEQ 0 (
+    echo.
+    echo ================================================================
+    echo Streamlit exited with error code !STREAMLIT_EXIT!.
+    echo If you don't see a traceback above, likely causes:
+    echo  - antivirus blocked python.exe from listening on port 8501;
+    echo  - port 8501 already in use by another process;
+    echo  - a dependency install completed only partially.
+    echo Try:
+    echo  1) close this window;
+    echo  2) delete the "python\.deps-installed" file;
+    echo  3) run launch.bat again.
+    echo ================================================================
+    pause
+)
 
 endlocal
