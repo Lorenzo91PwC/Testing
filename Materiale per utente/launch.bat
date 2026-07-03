@@ -123,10 +123,11 @@ echo.
 "%PY_EXE%" -m streamlit run app.py
 set "STREAMLIT_EXIT=!ERRORLEVEL!"
 
-REM Keep the window open on non-zero exit so any traceback stays visible.
+REM Keep the window open no matter how streamlit exited. On a clean exit
+REM the user just closes it; on a crash they can read the traceback.
+echo.
+echo ================================================================
 if !STREAMLIT_EXIT! NEQ 0 (
-    echo.
-    echo ================================================================
     echo Streamlit exited with error code !STREAMLIT_EXIT!.
     echo If you don't see a traceback above, likely causes:
     echo  - antivirus blocked python.exe from listening on port 8501;
@@ -136,8 +137,10 @@ if !STREAMLIT_EXIT! NEQ 0 (
     echo  1) close this window;
     echo  2) delete the "python\.deps-installed" file;
     echo  3) run launch.bat again.
-    echo ================================================================
-    pause
+) else (
+    echo Streamlit has exited cleanly. Close this window whenever you like.
 )
+echo ================================================================
+pause
 
 endlocal
