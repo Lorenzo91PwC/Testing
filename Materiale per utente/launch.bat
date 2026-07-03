@@ -4,6 +4,16 @@ REM Sunrise + Astra Input Builder — launcher
 REM Runs entirely from this folder. Only requirement: internet access at the
 REM very first launch (to download Python + dependencies). No admin rights,
 REM no Python installation, no compiled executable.
+REM
+REM Design note: every step that would previously live inside a parenthesised
+REM IF block has been moved to a labelled block reached via GOTO. This
+REM sidesteps a whole class of cmd.exe quoting/expansion bugs that were
+REM causing pip install to silently fail on some Windows configurations
+REM even though the exact same command typed by hand worked fine.
+REM
+REM All setup output (in particular pip install output) is also mirrored to
+REM install.log next to launch.bat, so any residual failure can be
+REM diagnosed after the fact.
 REM ===========================================================================
 
 setlocal EnableDelayedExpansion
@@ -16,89 +26,61 @@ set "PY_DIR=python"
 set "PY_EXE=%PY_DIR%\python.exe"
 set "PTH_FILE=%PY_DIR%\python311._pth"
 set "MARKER=%PY_DIR%\.deps-installed"
+set "LOG=install.log"
 
 REM --- Step 1: download and unpack Python embeddable ------------------------
-if not exist "%PY_EXE%" (
-    echo First-time setup — downloading Python %PY_VER% embeddable.
-    if not exist "%PY_DIR%" mkdir "%PY_DIR%"
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$ErrorActionPreference='Stop'; try { Invoke-WebRequest -UseBasicParsing -Uri '%PY_ZIP_URL%' -OutFile 'python.zip'; Expand-Archive -Force 'python.zip' -DestinationPath '%PY_DIR%'; Remove-Item 'python.zip' } catch { Write-Host $_; exit 1 }"
-    if !ERRORLEVEL! NEQ 0 (
-        echo.
-        echo ERROR: Python download failed. Check your internet connection and rerun.
-        pause
-        exit /b 1
-    )
-)
+if exist "%PY_EXE%" goto step_pth
+echo First-time setup — downloading Python %PY_VER% embeddable...
+if not exist "%PY_DIR%" mkdir "%PY_DIR%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ErrorActionPreference='Stop'; try { Invoke-WebRequest -UseBasicParsing -Uri '%PY_ZIP_URL%' -OutFile 'python.zip'; Expand-Archive -Force 'python.zip' -DestinationPath '%PY_DIR%'; Remove-Item 'python.zip' } catch { Write-Host $_; exit 1 }"
+if errorlevel 1 goto err_python_download
 
 REM --- Step 2: enable pip / site-packages loader ---------------------------
+:step_pth
 REM Python embeddable ships with a *._pth file that disables site.py. Pip
-REM needs `import site` uncommented to install packages into Lib\site-packages.
-if exist "%PTH_FILE%" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$p='%PTH_FILE%'; $t=Get-Content $p -Raw; if ($t -notmatch '(?m)^import site') { $t=[Regex]::Replace($t,'(?m)^#\s*import site','import site'); if ($t -notmatch '(?m)^import site') { $t += \"`nimport site`n\" }; Set-Content $p $t -NoNewline }"
-)
+REM needs `import site` uncommented to install into Lib\site-packages.
+if not exist "%PTH_FILE%" goto step_pip_bootstrap
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$p='%PTH_FILE%'; $t=Get-Content $p -Raw; if ($t -notmatch '(?m)^import site') { $t=[Regex]::Replace($t,'(?m)^#\s*import site','import site'); if ($t -notmatch '(?m)^import site') { $t += \"`nimport site`n\" }; Set-Content $p $t -NoNewline }"
 
 REM --- Step 3: bootstrap pip -----------------------------------------------
-if not exist "%PY_DIR%\Scripts\pip.exe" (
-    echo Bootstrapping pip...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$ErrorActionPreference='Stop'; try { Invoke-WebRequest -UseBasicParsing -Uri '%GET_PIP_URL%' -OutFile 'get-pip.py' } catch { Write-Host $_; exit 1 }"
-    if !ERRORLEVEL! NEQ 0 (
-        echo ERROR: get-pip.py download failed.
-        pause
-        exit /b 1
-    )
-    "%PY_EXE%" get-pip.py --no-warn-script-location
-    if !ERRORLEVEL! NEQ 0 (
-        echo ERROR: pip install failed.
-        pause
-        exit /b 1
-    )
-    del get-pip.py
-)
+:step_pip_bootstrap
+if exist "%PY_DIR%\Scripts\pip.exe" goto step_deps
+echo Bootstrapping pip...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ErrorActionPreference='Stop'; try { Invoke-WebRequest -UseBasicParsing -Uri '%GET_PIP_URL%' -OutFile 'get-pip.py' } catch { Write-Host $_; exit 1 }"
+if errorlevel 1 goto err_getpip_download
+"%PY_EXE%" get-pip.py --no-warn-script-location
+if errorlevel 1 goto err_pip_bootstrap
+del get-pip.py
 
 REM --- Step 4: install runtime dependencies (one-time) ---------------------
-REM The marker is written ONLY after we verify that streamlit is actually
-REM importable — that way a partially-failed install doesn't fool us at the
-REM next launch.
-if exist "%MARKER%" (
-    "%PY_EXE%" -c "import streamlit, openpyxl, pandas" 1>nul 2>nul
-    if !ERRORLEVEL! NEQ 0 (
-        echo Marker present but dependencies broken — reinstalling.
-        del "%MARKER%"
-    )
-)
+REM Moved out of parenthesised IF blocks: some cmd.exe versions mangled the
+REM quoted pip install line when it was nested inside one, causing pip to
+REM be launched with the wrong arguments (or not launched at all).
+:step_deps
+if not exist "%MARKER%" goto do_install
+"%PY_EXE%" -c "import streamlit, openpyxl, pandas" >nul 2>nul
+if not errorlevel 1 goto step_credentials
+echo Marker present but dependencies broken — reinstalling.
+del "%MARKER%"
 
-if not exist "%MARKER%" (
-    echo Installing dependencies (one-time, may take a couple of minutes)...
-    REM Version specs are single-quoted to avoid the '>' escaping quirks of
-    REM cmd inside parenthesised IF blocks — that was the root cause of a
-    REM couple of "streamlit not installed" reports.
-    "%PY_EXE%" -m pip install --no-warn-script-location "streamlit>=1.30" "openpyxl>=3.1" "pandas>=2.0"
-    if !ERRORLEVEL! NEQ 0 (
-        echo.
-        echo ERROR: Dependency installation failed. Check your internet connection.
-        pause
-        exit /b 1
-    )
-    REM Verify the install really worked before writing the marker.
-    "%PY_EXE%" -c "import streamlit, openpyxl, pandas" 1>nul 2>nul
-    if !ERRORLEVEL! NEQ 0 (
-        echo.
-        echo ERROR: Dependencies installed but Python cannot import them.
-        echo        Try deleting the "python" folder and rerun this launcher.
-        pause
-        exit /b 1
-    )
-    echo done > "%MARKER%"
-)
+:do_install
+echo Installing dependencies (one-time, may take a couple of minutes)...
+echo Detailed output will be written to %LOG%.
+"%PY_EXE%" -m pip install --no-warn-script-location "streamlit>=1.30" "openpyxl>=3.1" "pandas>=2.0" > "%LOG%" 2>&1
+if errorlevel 1 goto err_pip_install
+"%PY_EXE%" -c "import streamlit, openpyxl, pandas" >nul 2>nul
+if errorlevel 1 goto err_pip_import
+echo done > "%MARKER%"
 
 REM --- Step 5: pre-populate Streamlit user credentials ---------------------
+:step_credentials
 REM Some Streamlit versions prompt for an email address the very first
 REM time they run for a given Windows user, blocking the terminal until
 REM something is typed. Writing an empty credentials.toml in advance
-REM suppresses that prompt entirely.
+REM suppresses the prompt entirely.
 if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" 2>nul
 if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
     > "%USERPROFILE%\.streamlit\credentials.toml" echo [general]
@@ -110,10 +92,10 @@ start "" /B powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Start-Sleep -Seconds 4; Start-Process 'http://localhost:8501'"
 
 REM --- Step 7: launch Streamlit --------------------------------------------
-REM No CLI flags: the .streamlit\config.toml shipped in this folder already
-REM sets `server.headless = true` and `browser.gatherUsageStats = false`.
-REM Env vars are kept as a belt-and-suspenders fallback in case someone
-REM deletes the config file.
+REM No CLI flags: .streamlit\config.toml shipped in this folder already sets
+REM `server.headless = true` and `browser.gatherUsageStats = false`. Env
+REM vars are kept as a belt-and-suspenders fallback in case someone deletes
+REM the config file.
 set "STREAMLIT_SERVER_HEADLESS=true"
 set "STREAMLIT_BROWSER_GATHER_USAGE_STATS=false"
 echo.
@@ -122,12 +104,61 @@ echo (Close this window to stop the app.)
 echo.
 "%PY_EXE%" -m streamlit run app.py
 set "STREAMLIT_EXIT=!ERRORLEVEL!"
+goto end
 
-REM Keep the window open no matter how streamlit exited. On a clean exit
-REM the user just closes it; on a crash they can read the traceback.
+REM --- Error handlers -------------------------------------------------------
+:err_python_download
 echo.
 echo ================================================================
-if !STREAMLIT_EXIT! NEQ 0 (
+echo ERROR: Python download failed. Check internet connection and rerun.
+echo ================================================================
+pause
+exit /b 1
+
+:err_getpip_download
+echo.
+echo ================================================================
+echo ERROR: get-pip.py download failed. Check internet connection and rerun.
+echo ================================================================
+pause
+exit /b 1
+
+:err_pip_bootstrap
+echo.
+echo ================================================================
+echo ERROR: pip bootstrap (python get-pip.py) failed.
+echo ================================================================
+pause
+exit /b 1
+
+:err_pip_install
+echo.
+echo ================================================================
+echo ERROR: pip install failed. Full log written to %LOG%.
+echo Last 30 lines of the log:
+echo ----------------------------------------------------------------
+powershell -NoProfile -Command "Get-Content '%LOG%' -Tail 30"
+echo ================================================================
+pause
+exit /b 1
+
+:err_pip_import
+echo.
+echo ================================================================
+echo ERROR: pip install completed but Python still cannot import
+echo        streamlit / openpyxl / pandas. This usually means the
+echo        embeddable Python's path configuration is broken.
+echo        Try deleting the "python" folder and rerun this launcher.
+echo Log at %LOG%.
+echo ================================================================
+pause
+exit /b 1
+
+REM --- Final pause (also on clean exit) ------------------------------------
+:end
+echo.
+echo ================================================================
+if not "!STREAMLIT_EXIT!"=="0" (
     echo Streamlit exited with error code !STREAMLIT_EXIT!.
     echo If you don't see a traceback above, likely causes:
     echo  - antivirus blocked python.exe from listening on port 8501;
