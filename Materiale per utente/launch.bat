@@ -72,7 +72,10 @@ if exist "%MARKER%" (
 
 if not exist "%MARKER%" (
     echo Installing dependencies (one-time, may take a couple of minutes)...
-    "%PY_EXE%" -m pip install --no-warn-script-location streamlit^>=1.30 openpyxl^>=3.1 pandas^>=2.0
+    REM Version specs are single-quoted to avoid the '>' escaping quirks of
+    REM cmd inside parenthesised IF blocks — that was the root cause of a
+    REM couple of "streamlit not installed" reports.
+    "%PY_EXE%" -m pip install --no-warn-script-location "streamlit>=1.30" "openpyxl>=3.1" "pandas>=2.0"
     if !ERRORLEVEL! NEQ 0 (
         echo.
         echo ERROR: Dependency installation failed. Check your internet connection.
