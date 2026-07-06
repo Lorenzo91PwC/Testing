@@ -368,9 +368,16 @@ def validate_transcodifica_file(path: Path) -> list[ValidationIssue]:
     return issues
 
 
-def validate_payment_patterns_file(path: Path) -> list[ValidationIssue]:
+def validate_payment_patterns_file(
+    path: Path, sheet_suffix: str = "AAI",
+) -> list[ValidationIssue]:
+    """Verify the Payment_Patterns_&_Risk_Adjustments workbook contains
+    the two sheets ``ra_<suffix>_REINS`` and ``pp_<suffix>_REINS`` with
+    the expected header layout."""
     issues: list[ValidationIssue] = []
     fname = path.name
+    ra_sheet = f"ra_{sheet_suffix}_REINS"
+    pp_sheet = f"pp_{sheet_suffix}_REINS"
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except Exception as e:
@@ -379,33 +386,35 @@ def validate_payment_patterns_file(path: Path) -> list[ValidationIssue]:
             code="CANNOT_OPEN", message=f"Cannot open file: {e}",
         )]
     try:
-        if "ra_AAI_REINS" not in wb.sheetnames:
+        if ra_sheet not in wb.sheetnames:
             issues.append(ValidationIssue(
                 file=fname, severity="error", location="sheet",
                 code="MISSING_SHEET",
                 message=(
-                    "Sheet 'ra_AAI_REINS' not found. Available: "
+                    f"Sheet '{ra_sheet}' not found. Available: "
                     f"{wb.sheetnames}"
                 ),
             ))
-        if "pp_AAI_REINS" not in wb.sheetnames:
+        if pp_sheet not in wb.sheetnames:
             issues.append(ValidationIssue(
                 file=fname, severity="error", location="sheet",
                 code="MISSING_SHEET",
                 message=(
-                    "Sheet 'pp_AAI_REINS' not found. Available: "
+                    f"Sheet '{pp_sheet}' not found. Available: "
                     f"{wb.sheetnames}"
                 ),
             ))
-        if "ra_AAI_REINS" in wb.sheetnames:
-            ws = wb["ra_AAI_REINS"]
+        if ra_sheet in wb.sheetnames:
+            ws = wb[ra_sheet]
             header = next(ws.iter_rows(values_only=True), None) or ()
             if len(header) < 8 or header[6] is None:
                 issues.append(ValidationIssue(
                     file=fname, severity="error",
-                    location="sheet 'ra_AAI_REINS', header",
+                    location=f"sheet '{ra_sheet}', header",
                     code="MISSING_GOC_COLUMN",
-                    message="Column G ('GoC') is missing on sheet 'ra_AAI_REINS'.",
+                    message=(
+                        f"Column G ('GoC') is missing on sheet '{ra_sheet}'."
+                    ),
                 ))
             year_pattern = re.compile(r"^(FY|HY)_?\d{4}$")
             year_cols = [
@@ -415,24 +424,24 @@ def validate_payment_patterns_file(path: Path) -> list[ValidationIssue]:
             if not year_cols:
                 issues.append(ValidationIssue(
                     file=fname, severity="error",
-                    location="sheet 'ra_AAI_REINS', header",
+                    location=f"sheet '{ra_sheet}', header",
                     code="MISSING_YEAR_COLUMNS",
                     message=(
                         "No FY_yyyy / HY_yyyy column header found after "
                         "column G."
                     ),
                 ))
-        if "pp_AAI_REINS" in wb.sheetnames:
-            ws = wb["pp_AAI_REINS"]
+        if pp_sheet in wb.sheetnames:
+            ws = wb[pp_sheet]
             header = next(ws.iter_rows(values_only=True), None) or ()
             if len(header) < 4 or header[2] is None or header[3] is None:
                 issues.append(ValidationIssue(
                     file=fname, severity="error",
-                    location="sheet 'pp_AAI_REINS', header",
+                    location=f"sheet '{pp_sheet}', header",
                     code="MISSING_KEY_COLUMNS",
                     message=(
-                        "Columns C ('GoC') and D ('Year') must be populated on "
-                        "the header of sheet 'pp_AAI_REINS'."
+                        "Columns C ('GoC') and D ('Year') must be "
+                        f"populated on the header of sheet '{pp_sheet}'."
                     ),
                 ))
             expected = [str(i) for i in range(23)]
@@ -445,7 +454,7 @@ def validate_payment_patterns_file(path: Path) -> list[ValidationIssue]:
             if missing:
                 issues.append(ValidationIssue(
                     file=fname, severity="error",
-                    location="sheet 'pp_AAI_REINS', header",
+                    location=f"sheet '{pp_sheet}', header",
                     code="MISSING_PP_COLUMNS",
                     message=(
                         "Some of the 23 data columns ('0'..'22') are missing "
@@ -717,9 +726,18 @@ def validate_curve_id_param_file(path: Path) -> list[ValidationIssue]:
 # Aggregate validators — called by the Streamlit pages
 # ===========================================================================
 def validate_sunrise_inputs(
-    input_paths: list[Path], year: int, semester: int,
+    input_paths: list[Path],
+    year: int,
+    semester: int,
+    sheet_suffix: str = "AAI",
 ) -> ValidationReport:
-    """Validate the full set of Sunrise inputs (L0 + L1 + L2)."""
+    """Validate the full set of Sunrise inputs (L0 + L1 + L2).
+
+    ``sheet_suffix`` locates the Risk-Adjustment / Payment-pattern
+    sheets inside the ``Payment_Patterns_&_Risk_Adjustments`` workbook
+    (defaults to ``"AAI"`` so the historical layout keeps validating
+    without a code change).
+    """
     report = ValidationReport()
 
     # L0: required files
@@ -767,7 +785,7 @@ def validate_sunrise_inputs(
     for f in transcodifica_files:
         report.extend(validate_transcodifica_file(f))
     for f in payment_files:
-        report.extend(validate_payment_patterns_file(f))
+        report.extend(validate_payment_patterns_file(f, sheet_suffix))
 
     return report
 

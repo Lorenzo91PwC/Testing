@@ -79,13 +79,6 @@ RUNS_DIR.mkdir(exist_ok=True)
 
 CSV_MIME = "text/csv"
 
-ENTITIES: list[tuple[int, str]] = [
-    (14, "MPS"),
-    (6, "AAI"),
-    (11, "DIRECT ITALY"),
-    (19, "NOBIS"),
-]
-
 st.set_page_config(
     page_title="Sunrise Input Builder",
     page_icon="📊",
@@ -135,31 +128,79 @@ with col_sem:
         format_func=lambda s: "HY" if s == 1 else "FY",
     )
 st.caption(
-    "Entities to analyze — pick from the list or type a new one in "
-    "the format `X - name` (e.g. `99 - CUSTOM`) and press Enter."
+    "**Entity to analyze** — la prima colonna è l'etichetta "
+    "dell'entity nel formato `ID - nome` (es. `6 - AAI`). La "
+    "seconda colonna è il suffisso usato per identificare gli sheet "
+    "Risk_Adjustment / Payment_pattern nel workbook "
+    "`Payment_Patterns_&_Risk_Adjustments`: cerca "
+    "`ra_<suffisso>_REINS` e `pp_<suffisso>_REINS`. Puoi aggiungere "
+    "righe con il `+` in fondo alla tabella; il run usa la riga "
+    "selezionata sotto."
 )
-raw_entity_selection = st.multiselect(
-    "Entities to analyze",
-    options=ENTITIES,
-    default=[ENTITIES[1]],
-    format_func=lambda e: f"{e[0]} — {e[1]}",
-    accept_new_options=True,
-    label_visibility="collapsed",
+entities_df = st.data_editor(
+    pd.DataFrame(
+        [
+            {"Entity": "6 - AAI", "Sheet suffix": "AAI"},
+            {"Entity": "14 - MPS", "Sheet suffix": "AMAD"},
+        ]
+    ),
+    num_rows="dynamic",
+    hide_index=True,
+    column_config={
+        "Entity": st.column_config.TextColumn(
+            "Entity",
+            required=True,
+            help="Formato: `ID - nome`, es. `6 - AAI`.",
+        ),
+        "Sheet suffix": st.column_config.TextColumn(
+            "Sheet suffix",
+            required=True,
+            help=(
+                "Suffisso degli sheet dentro il file "
+                "Payment_Patterns_&_Risk_Adjustments "
+                "(`ra_<suffisso>_REINS`, `pp_<suffisso>_REINS`)."
+            ),
+        ),
+    },
+    key="sunrise_entities_editor",
 )
-parsed_entities: list[tuple[int, str]] = []
-invalid_entries: list[str] = []
-for item in raw_entity_selection:
-    parsed = _parse_entity_selection(item)
-    if parsed is None:
-        invalid_entries.append(str(item))
-    else:
-        parsed_entities.append(parsed)
-if invalid_entries:
+_entity_rows: list[tuple[int, str, str]] = []
+_invalid_entries: list[str] = []
+for _, _row in entities_df.iterrows():
+    _ent_raw = str(_row.get("Entity") or "").strip()
+    _suf = str(_row.get("Sheet suffix") or "").strip()
+    if not _ent_raw and not _suf:
+        continue
+    _match = _ENTITY_FREEFORM_RE.match(_ent_raw) if _ent_raw else None
+    if _match is None or not _suf:
+        _invalid_entries.append(_ent_raw or "(vuoto)")
+        continue
+    _entity_rows.append(
+        (int(_match.group(1)), _match.group(2).strip(), _suf)
+    )
+if _invalid_entries:
     st.warning(
-        "These entries don't match the `X - name` format and were "
-        f"ignored: {invalid_entries}",
+        "Righe della tabella entities ignorate — la prima colonna deve "
+        "essere nel formato `ID - nome` e la seconda colonna non vuota. "
+        f"Ignorate: {_invalid_entries}",
         icon="⚠️",
     )
+
+parsed_entities: list[tuple[int, str]] = []
+sheet_suffix: str = ""
+if _entity_rows:
+    _labels = [
+        f"{eid} - {ename}  →  sheet suffix: {suf}"
+        for eid, ename, suf in _entity_rows
+    ]
+    _picked_idx = st.radio(
+        "Riga usata per il run",
+        options=range(len(_entity_rows)),
+        format_func=lambda i: _labels[i],
+        key="sunrise_entity_pick",
+    )
+    _eid, _ename, sheet_suffix = _entity_rows[_picked_idx]
+    parsed_entities = [(_eid, _ename)]
 
 st.caption(
     "**GOC not to be considered** — type an 11-char GOC name "
@@ -224,7 +265,10 @@ if run_clicked and uploaded and parsed_entities:
         input_paths.append(p)
 
     report = validate_sunrise_inputs(
-        input_paths, year=int(year), semester=int(semester)
+        input_paths,
+        year=int(year),
+        semester=int(semester),
+        sheet_suffix=sheet_suffix,
     )
     _render_validation_report(report)
     # Always persist the report next to the run, so the user can audit
@@ -244,6 +288,7 @@ if run_clicked and uploaded and parsed_entities:
                     entities=parsed_entities,
                     year=int(year),
                     semester=int(semester),
+                    sheet_suffix=sheet_suffix,
                     gocs_to_exclude=gocs_to_exclude,
                     goc_renames=goc_renames,
                 )

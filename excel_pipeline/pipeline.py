@@ -81,6 +81,7 @@ def run_phase1(
     entities: list[tuple[int, str]],
     year: int,
     semester: int,
+    sheet_suffix: str = "AAI",
     gocs_to_exclude: list[str] | None = None,
     goc_renames: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -92,8 +93,10 @@ def run_phase1(
     - the ``Transcodifica_aggregazione_GOC_H_NH`` master list, used for
       MP_ModelPoint's Aggregation1 / Aggregation2 columns;
     - the ``Payment_Patterns_&_Risk_Adjustments`` workbook, used for
-      ``Risk_Adjustment.csv`` and ``Payment_pattern.csv`` (sheets
-      ``ra_AAI_REINS`` and ``pp_AAI_REINS``).
+      ``Risk_Adjustment.csv`` and ``Payment_pattern.csv``. The sheet
+      names are built from ``sheet_suffix``: ``ra_<suffix>_REINS`` and
+      ``pp_<suffix>_REINS`` (default suffix ``"AAI"`` → historical
+      names ``ra_AAI_REINS`` / ``pp_AAI_REINS``).
 
     Outputs produced:
     - ``MP_ModelPoint.csv`` (driven by SINISTRI / RISERVA_SINISTRI; GoCs
@@ -166,11 +169,14 @@ def run_phase1(
     )
 
     pp_path = _find_file_by_suffix(input_paths, PAYMENT_PATTERNS_SUFFIX)
+    ra_sheet = f"ra_{sheet_suffix}_REINS"
+    pp_sheet = f"pp_{sheet_suffix}_REINS"
     ra_values = lookup_risk_adjustment_values(
         path=str(pp_path),
         goc_names=goc_list,
         year=year,
         semester=semester,
+        sheet=ra_sheet,
     )
     ra_path = run_dir / "Risk_Adjustment.csv"
     create_risk_adjustment(
@@ -184,6 +190,7 @@ def run_phase1(
         goc_names=goc_list,
         year=year,
         semester=semester,
+        sheet=pp_sheet,
     )
     payment_pattern_path = run_dir / "Payment_pattern.csv"
     create_payment_pattern(
@@ -216,7 +223,6 @@ def run_phase1(
 def run_astra_phase1(
     input_paths: list[Path],
     run_dir: Path,
-    entities: list[tuple[int, str]],
     year: int,
     semester: int,
     business_type: str,
@@ -268,13 +274,7 @@ def run_astra_phase1(
     dicts produced by the Sunrise run (typically read from session
     state by the Astra page). It replaces the legacy
     ``AAI_P&C_Ceded`` upload that this pipeline used to read directly.
-
-    ``entities`` is accepted for symmetry with the Astra UI form (which
-    now mirrors the Sunrise multiselect with ``X - name`` free-form
-    entries) but is not used by the current transformations.
     """
-    del entities  # reserved for future skills
-
     # Cap the Sunrise-produced pairs at the 16-year window around the
     # Astra analysis year. GoC exclusions/renames live on the Sunrise
     # page only, so by the time the pairs reach Astra they're already

@@ -6,7 +6,6 @@ pipeline runs on those.
 """
 from __future__ import annotations
 
-import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -47,27 +46,6 @@ def _render_validation_report(report: ValidationReport) -> None:
             icon="⚠️",
         )
 
-_ENTITY_FREEFORM_RE = re.compile(r"^\s*(\d+)\s*-\s*(.+?)\s*$")
-
-
-def _parse_entity_selection(item: object) -> tuple[int, str] | None:
-    """Normalize a multiselect entry to a ``(id, name)`` tuple.
-
-    Accepts:
-    - the original ``(id, name)`` tuple from the preset list,
-    - a free-form string the user typed in the format ``"X - name"`` where
-      ``X`` is a positive integer and ``name`` is non-empty.
-
-    Returns ``None`` for anything that does not match.
-    """
-    if isinstance(item, tuple) and len(item) == 2:
-        return item
-    if isinstance(item, str):
-        m = _ENTITY_FREEFORM_RE.match(item)
-        if m:
-            return (int(m.group(1)), m.group(2).strip())
-    return None
-
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -76,13 +54,6 @@ RUNS_DIR = ROOT / "runs"
 RUNS_DIR.mkdir(exist_ok=True)
 
 CSV_MIME = "text/csv"
-
-ENTITIES: list[tuple[int, str]] = [
-    (14, "MPS"),
-    (6, "AAI"),
-    (11, "DIRECT ITALY"),
-    (19, "NOBIS"),
-]
 
 ASTRA_DEFAULT_AOM_IMPACT_PAIRS: list[tuple[str, int]] = [
     ("DA_LIC_OP", 0),
@@ -137,33 +108,6 @@ with col_sem:
         horizontal=True,
         format_func=lambda s: "HY" if s == 1 else "FY",
     )
-st.caption(
-    "Entities to analyze — pick from the list or type a new one in "
-    "the format `X - name` (e.g. `99 - CUSTOM`) and press Enter."
-)
-raw_entity_selection = st.multiselect(
-    "Entities to analyze",
-    options=ENTITIES,
-    default=[ENTITIES[1]],
-    format_func=lambda e: f"{e[0]} — {e[1]}",
-    accept_new_options=True,
-    label_visibility="collapsed",
-)
-parsed_entities: list[tuple[int, str]] = []
-invalid_entries: list[str] = []
-for item in raw_entity_selection:
-    parsed = _parse_entity_selection(item)
-    if parsed is None:
-        invalid_entries.append(str(item))
-    else:
-        parsed_entities.append(parsed)
-if invalid_entries:
-    st.warning(
-        "These entries don't match the `X - name` format and were "
-        f"ignored: {invalid_entries}",
-        icon="⚠️",
-    )
-
 col_close_curve, col_open_curve = st.columns(2)
 with col_close_curve:
     closing_curve_name = st.text_input(
@@ -257,9 +201,9 @@ if not sunrise_ready:
 run_clicked = st.button(
     "▶ Run pipeline",
     type="primary",
-    disabled=not (uploaded and parsed_entities and sunrise_ready),
+    disabled=not (uploaded and sunrise_ready),
 )
-if run_clicked and uploaded and parsed_entities and sunrise_ready:
+if run_clicked and uploaded and sunrise_ready:
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     run_dir = RUNS_DIR / run_id
     inputs_dir = run_dir / "inputs"
@@ -284,7 +228,6 @@ if run_clicked and uploaded and parsed_entities and sunrise_ready:
                 outputs = run_astra_phase1(
                     input_paths=input_paths,
                     run_dir=run_dir,
-                    entities=parsed_entities,
                     year=int(year),
                     semester=int(semester),
                     business_type="",  # reserved for future use; UI removed

@@ -229,6 +229,115 @@ def test_run_phase1_raises_without_any_ceded_or_assumed(tmp_path: Path) -> None:
         )
 
 
+def _build_payment_patterns_fixture_with_suffix(path: Path, suffix: str) -> None:
+    """Same shape as ``_build_payment_patterns_fixture`` but the sheets are
+    named ``ra_<suffix>_REINS`` and ``pp_<suffix>_REINS`` — used to prove
+    that ``sheet_suffix`` is threaded end-to-end.
+    """
+    wb = openpyxl.Workbook()
+    ra = wb.active
+    ra.title = f"ra_{suffix}_REINS"
+    ra.cell(row=1, column=7, value="GoC")
+    for i, h in enumerate(["HY_2024", "FY_2024", "HY_2025", "FY_2025"], start=8):
+        ra.cell(row=1, column=i, value=h)
+    ra.cell(row=2, column=7, value="Motor")
+    for j, v in enumerate([777, 778, 779, 780]):
+        ra.cell(row=2, column=8 + j, value=v)
+    pp = wb.create_sheet(f"pp_{suffix}_REINS")
+    pp.cell(row=1, column=3, value="GoC")
+    pp.cell(row=1, column=4, value="Year")
+    for i in range(23):
+        pp.cell(row=1, column=5 + i, value=str(i))
+    for r, (goc, yr) in enumerate(
+        [("Motor", "FY2025"), ("Motor", "FY2024")], start=2,
+    ):
+        pp.cell(row=r, column=3, value=goc)
+        pp.cell(row=r, column=4, value=yr)
+        for i in range(23):
+            pp.cell(row=r, column=5 + i, value=9000 + i)
+    wb.save(path)
+
+
+def test_run_phase1_uses_sheet_suffix(tmp_path: Path) -> None:
+    """Selecting a different sheet_suffix reads the RA and PP data from
+    ``ra_<suffix>_REINS`` / ``pp_<suffix>_REINS`` instead of the default
+    ``ra_AAI_REINS`` / ``pp_AAI_REINS`` sheets.
+    """
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded, ["Motor"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("Motor", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture_with_suffix(payments, "AMAD")
+
+    result = run_phase1(
+        input_paths=[ceded, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(14, "MPS")],
+        year=2025,
+        semester=2,
+        sheet_suffix="AMAD",
+    )
+
+    # RA closing = FY_2025 = 780, opening = FY_2024 = 778
+    ra_rows = _read_csv(result["outputs"][3])
+    assert ra_rows[0] == ("ObservationID", "Risk_Adjustment")
+    by_key = {r[0]: r[1] for r in ra_rows[1:]}
+    assert by_key["Motor@Closing"] == 780
+    assert by_key["Motor@Opening"] == 778
+
+    # PP row for Motor / FY2025 comes from the same custom sheet
+    pp_rows = _read_csv(result["outputs"][4])
+    motor_2025 = next(r for r in pp_rows[1:] if r[0] == "Motor" and r[1] == 2025)
+    assert motor_2025[2] == 9000  # column "0" of the AMAD sheet
+
+
+def test_run_phase1_default_sheet_suffix_is_aai(tmp_path: Path) -> None:
+    """Not passing sheet_suffix keeps the historical `ra_AAI_REINS` /
+    `pp_AAI_REINS` behaviour — proves backward compat for existing runs.
+    """
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded, ["Motor"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("Motor", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)  # default: sheet names use AAI
+
+    result = run_phase1(
+        input_paths=[ceded, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+    )
+    # Motor @Closing FY_2025 = 130 in the AAI fixture
+    ra_rows = _read_csv(result["outputs"][3])
+    by_key = {r[0]: r[1] for r in ra_rows[1:]}
+    assert by_key["Motor@Closing"] == 130
+
+
 def _build_ceded_with_pairs_fixture(
     path: Path, rows_data: list[tuple[str | None, int | None]]
 ) -> None:
@@ -337,7 +446,6 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
     outputs = run_astra_phase1(
         input_paths=[pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
-        entities=[(6, "AAI")],
         year=2024,
         semester=2,
         business_type="Diretto",
@@ -475,7 +583,6 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     outputs = run_astra_phase1(
         input_paths=[pp_params, mp_goc_seg, mp_goc, aom_impact, curve_id_param],
         run_dir=tmp_path,
-        entities=[(6, "AAI")],
         year=2024,
         semester=2,
         business_type="Diretto",
@@ -505,7 +612,6 @@ def test_run_astra_phase1_missing_required_input(tmp_path: Path) -> None:
         run_astra_phase1(
             input_paths=[other],
             run_dir=tmp_path,
-            entities=[(6, "AAI")],
             year=2024,
             semester=2,
             business_type="Diretto",
