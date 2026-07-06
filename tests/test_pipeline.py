@@ -16,8 +16,8 @@ from excel_pipeline.pipeline import (
 def _read_csv(path: Path) -> list[tuple]:
     """Read CSV rows; coerce numeric cells to int/float, '' to None.
 
-    Uses ``;`` field separator and converts ``,`` decimal back to ``.``
-    so floats round-trip correctly (matches ``_write_csv_rows``).
+    Uses ``;`` field separator; floats use ``.`` as decimal separator
+    (matches ``_write_csv_rows``).
     """
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.reader(f, delimiter=";")
@@ -34,7 +34,7 @@ def _read_csv(path: Path) -> list[tuple]:
                 except ValueError:
                     pass
                 try:
-                    cells.append(float(cell.replace(",", ".")))
+                    cells.append(float(cell))
                     continue
                 except ValueError:
                     pass

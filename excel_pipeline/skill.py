@@ -73,29 +73,29 @@ def _read_csv_table(path: str) -> list[list[Any]]:
 
 
 def _format_csv_value(value: Any) -> str:
-    """Convert a Python value to its European-CSV string form.
+    """Convert a Python value to its CSV string form.
 
-    ``None`` -> empty string. ``float`` -> ``str(value).replace('.', ',')``
-    so the decimal separator becomes a comma, e.g. ``12578297.451346``
-    becomes ``12578297,451346``. ``bool`` is preserved as ``True/False``.
-    Everything else (``int``, ``str``, ...) is passed through ``str``.
+    ``None`` -> empty string. ``float`` -> ``repr(value)`` so the
+    decimal separator stays a ``.`` (e.g. ``12578297.451346`` is
+    written as-is). ``bool`` is preserved as ``True/False``. Everything
+    else (``int``, ``str``, ...) is passed through ``str``.
     """
     if value is None:
         return ""
     if isinstance(value, bool):
         return "True" if value else "False"
     if isinstance(value, float):
-        return repr(value).replace(".", ",")
+        return repr(value)
     return str(value)
 
 
 def _write_csv_rows(path: str, rows: Iterable[Iterable[Any]]) -> None:
     """Write rows to a CSV file (UTF-8 with BOM), creating parent dirs.
 
-    Uses the European convention so files open natively in Italian-locale
-    Excel: ``;`` is the field separator and floats are written with a
-    comma decimal (e.g. ``12578297,451346``). Integers keep their plain
-    integer form (no decimal point).
+    Field separator is ``;`` (keeps files opening natively in
+    Italian-locale Excel). Floats keep the ``.`` as decimal separator
+    — e.g. ``12578297.451346`` — regardless of the host locale.
+    Integers keep their plain integer form (no decimal point).
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:

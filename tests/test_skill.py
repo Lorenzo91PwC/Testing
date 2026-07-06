@@ -9,6 +9,8 @@ import pytest
 
 from excel_pipeline.skill import (
     MANDATORY_ACTUALS_VARIABLE_NAMES,
+    _format_csv_value,
+    _write_csv_rows,
     create_coverage_unit,
     create_empty_csv,
     create_mandatory_actuals,
@@ -42,8 +44,7 @@ def _read_csv(path: Path) -> list[tuple]:
     """Read CSV rows; coerce numeric cells to int/float, '' to None.
 
     Matches the European convention used by ``_write_csv_rows`` —
-    ``;`` field separator, ``,`` decimal — and converts ``"12,5"`` back
-    to ``12.5`` (float).
+    ``;`` field separator, ``.`` decimal — matches ``_write_csv_rows``.
     """
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.reader(f, delimiter=";")
@@ -60,7 +61,7 @@ def _read_csv(path: Path) -> list[tuple]:
                 except ValueError:
                     pass
                 try:
-                    cells.append(float(cell.replace(",", ".")))
+                    cells.append(float(cell))
                     continue
                 except ValueError:
                     pass
@@ -75,6 +76,33 @@ def _write_csv(path: Path, rows: list[tuple]) -> None:
         writer = csv.writer(f, delimiter=";")
         for row in rows:
             writer.writerow(["" if v is None else v for v in row])
+
+
+def test_format_csv_value_uses_dot_decimal_separator() -> None:
+    """Every output CSV must use '.' as decimal separator, not ','. This
+    test locks the contract at the formatter level so any regression on
+    the pipeline outputs surfaces here first.
+    """
+    assert _format_csv_value(12578297.451346) == "12578297.451346"
+    assert _format_csv_value(-6.5) == "-6.5"
+    assert _format_csv_value(0.0) == "0.0"
+    # Non-floats are untouched
+    assert _format_csv_value(None) == ""
+    assert _format_csv_value(42) == "42"
+    assert _format_csv_value("hello") == "hello"
+    assert _format_csv_value(True) == "True"
+
+
+def test_write_csv_rows_output_has_dot_decimals(tmp_path: Path) -> None:
+    """End-to-end check: a file written with float values contains '.'
+    as decimal separator, not ','.
+    """
+    p = tmp_path / "sample.csv"
+    _write_csv_rows(p, [("A", "B"), (1.5, -2.75)])
+    raw = p.read_text(encoding="utf-8-sig")
+    assert "1.5" in raw
+    assert "-2.75" in raw
+    assert "," not in raw  # no decimal comma anywhere in a purely-numeric row
 
 
 def _build_ceded_fixture(path: Path) -> None:
