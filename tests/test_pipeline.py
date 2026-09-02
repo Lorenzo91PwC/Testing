@@ -13,14 +13,19 @@ from excel_pipeline.pipeline import (
 )
 
 
-def _read_csv(path: Path) -> list[tuple]:
+def _read_csv(
+    path: Path,
+    field_sep: str = ";",
+    decimal_sep: str = ",",
+) -> list[tuple]:
     """Read CSV rows; coerce numeric cells to int/float, '' to None.
 
-    Uses ``;`` field separator; floats use ``.`` as decimal separator
-    (matches ``_write_csv_rows``).
+    Defaults match Sunrise output (``;`` field separator, ``,`` decimal).
+    Astra output uses ``,`` field separator with ``.`` decimal — pass
+    ``field_sep=","`` and ``decimal_sep="."`` when reading Astra CSVs.
     """
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f, delimiter=";")
+        reader = csv.reader(f, delimiter=field_sep)
         rows: list[tuple] = []
         for raw in reader:
             cells = []
@@ -33,14 +38,24 @@ def _read_csv(path: Path) -> list[tuple]:
                     continue
                 except ValueError:
                     pass
+                normalized = (
+                    cell.replace(decimal_sep, ".")
+                    if decimal_sep != "."
+                    else cell
+                )
                 try:
-                    cells.append(float(cell))
+                    cells.append(float(normalized))
                     continue
                 except ValueError:
                     pass
                 cells.append(cell)
             rows.append(tuple(cells))
         return rows
+
+
+def _read_astra_csv(path: Path) -> list[tuple]:
+    """Shortcut for reading an Astra-format CSV (``,`` sep, ``.`` decimal)."""
+    return _read_csv(path, field_sep=",", decimal_sep=".")
 
 
 def _write_csv(path: Path, rows: list[tuple]) -> None:
@@ -472,7 +487,7 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
         assert p.exists()
 
     # NEW_BUSINESS_PPOS: one row per pair (3 pairs in fixture)
-    nb_rows = _read_csv(outputs[0])
+    nb_rows = _read_astra_csv(outputs[0])
     assert nb_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
@@ -480,12 +495,12 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
         ("IT06ABCDE2024", "CROSS_SUB_FASSCHNG", 0),
     ]
 
-    cu_rows = _read_csv(outputs[1])
+    cu_rows = _read_astra_csv(outputs[1])
     assert len(cu_rows) == 1 + 3
     assert cu_rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
     assert cu_rows[3] == ("IT06ABCDE2024", 1) + (0,) * 100
 
-    rein_rows = _read_csv(outputs[2])
+    rein_rows = _read_astra_csv(outputs[2])
     assert rein_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1, "T"),
         ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
@@ -496,13 +511,13 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
         ("IT06ABCDE2024", "LOSSRECO_CLOSING", 0, 2024),
     ]
 
-    ma_rows = _read_csv(outputs[3])
+    ma_rows = _read_astra_csv(outputs[3])
     assert len(ma_rows) == 1 + 3 * 16
     assert ma_rows[1] == ("IT05PABPPLE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
     assert ma_rows[17] == ("IT05PABPPLE2023", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
     assert ma_rows[33] == ("IT06ABCDE2024", "ACTUAL_PREMIUM_CF_PAST_SERVICE", 0)
 
-    pp_rows = _read_csv(outputs[4])
+    pp_rows = _read_astra_csv(outputs[4])
     by_param = {row[0]: row[1] for row in pp_rows[1:]}
     assert by_param["CF_TIMESTEP"] == "SEMESTRIAL"
     assert by_param["REPORTING_MONTH"] == "12_DECEMBER"
@@ -512,13 +527,13 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
     assert by_param["FX_REPORTING_DATE"] == 20241231
     assert by_param["PROJECTED_PERIODS"] == 110
 
-    seg_rows = _read_csv(outputs[5])
+    seg_rows = _read_astra_csv(outputs[5])
     assert seg_rows[1] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
     assert seg_rows[2] == (
         "IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1,
     )
 
-    mp_goc_rows = _read_csv(outputs[6])
+    mp_goc_rows = _read_astra_csv(outputs[6])
     by_cohort = {row[2]: row for row in mp_goc_rows[1:]}
     # E (idx 4), F (idx 5), L (idx 11), P (idx 15)
     # cohort <= 2015 -> col E is the fixed "20211231_ITA_LP100"
@@ -537,7 +552,7 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
         assert by_cohort[cohort][19] == "IT"
         assert by_cohort[cohort][20] == "IT"
 
-    aom_rows = _read_csv(outputs[7])
+    aom_rows = _read_astra_csv(outputs[7])
     assert aom_rows[0] == ("GOC_ID", "STEP_ID", 1)
     assert aom_rows[1:] == [
         ("IT05PABPPLE2023", "DA_LIC_CLO", 0),
@@ -549,7 +564,7 @@ def test_run_astra_phase1_uses_pairs_from_sunrise(tmp_path: Path) -> None:
         ("IT06ABCDE2024", "DA_LIC_OP", 0),
     ]
 
-    curve_rows = _read_csv(outputs[8])
+    curve_rows = _read_astra_csv(outputs[8])
     assert curve_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
@@ -594,7 +609,7 @@ def test_run_astra_phase1_filters_pairs_outside_window(tmp_path: Path) -> None:
     )
 
     # Only 3 of the 5 pairs survive the filter
-    nb_rows = _read_csv(outputs[0])
+    nb_rows = _read_astra_csv(outputs[0])
     assert nb_rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),

@@ -40,14 +40,19 @@ def _pair(goc: str, year: int) -> dict:
     return {"goc_id": f"{goc}{year}", "goc": goc, "year": year}
 
 
-def _read_csv(path: Path) -> list[tuple]:
+def _read_csv(
+    path: Path,
+    field_sep: str = ";",
+    decimal_sep: str = ",",
+) -> list[tuple]:
     """Read CSV rows; coerce numeric cells to int/float, '' to None.
 
-    Matches the European convention used by ``_write_csv_rows`` —
-    ``;`` field separator, ``.`` decimal — matches ``_write_csv_rows``.
+    Defaults match Sunrise output (``;`` field separator, ``,`` decimal).
+    Astra output uses ``,`` field separator with ``.`` decimal — pass
+    ``field_sep=","`` and ``decimal_sep="."`` when reading Astra CSVs.
     """
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f, delimiter=";")
+        reader = csv.reader(f, delimiter=field_sep)
         rows: list[tuple] = []
         for raw in reader:
             cells = []
@@ -60,14 +65,27 @@ def _read_csv(path: Path) -> list[tuple]:
                     continue
                 except ValueError:
                     pass
+                # Normalize the decimal separator to '.' before float parse
+                # so the returned floats are directly comparable to Python
+                # literals in test assertions.
+                normalized = (
+                    cell.replace(decimal_sep, ".")
+                    if decimal_sep != "."
+                    else cell
+                )
                 try:
-                    cells.append(float(cell))
+                    cells.append(float(normalized))
                     continue
                 except ValueError:
                     pass
                 cells.append(cell)
             rows.append(tuple(cells))
         return rows
+
+
+def _read_astra_csv(path: Path) -> list[tuple]:
+    """Shortcut for reading an Astra-format CSV (``,`` sep, ``.`` decimal)."""
+    return _read_csv(path, field_sep=",", decimal_sep=".")
 
 
 def _write_csv(path: Path, rows: list[tuple]) -> None:
@@ -78,31 +96,51 @@ def _write_csv(path: Path, rows: list[tuple]) -> None:
             writer.writerow(["" if v is None else v for v in row])
 
 
-def test_format_csv_value_uses_dot_decimal_separator() -> None:
-    """Every output CSV must use '.' as decimal separator, not ','. This
-    test locks the contract at the formatter level so any regression on
-    the pipeline outputs surfaces here first.
+def test_format_csv_value_sunrise_default_uses_comma_decimal() -> None:
+    """Sunrise output CSVs are Italian-Excel-friendly: ``,`` decimal
+    separator by default. Non-floats are unchanged.
     """
-    assert _format_csv_value(12578297.451346) == "12578297.451346"
-    assert _format_csv_value(-6.5) == "-6.5"
-    assert _format_csv_value(0.0) == "0.0"
-    # Non-floats are untouched
+    assert _format_csv_value(12578297.451346) == "12578297,451346"
+    assert _format_csv_value(-6.5) == "-6,5"
+    assert _format_csv_value(0.0) == "0,0"
     assert _format_csv_value(None) == ""
     assert _format_csv_value(42) == "42"
     assert _format_csv_value("hello") == "hello"
     assert _format_csv_value(True) == "True"
 
 
-def test_write_csv_rows_output_has_dot_decimals(tmp_path: Path) -> None:
-    """End-to-end check: a file written with float values contains '.'
-    as decimal separator, not ','.
+def test_format_csv_value_astra_uses_dot_decimal() -> None:
+    """Astra output CSVs use US convention: ``.`` decimal separator when
+    explicitly requested.
     """
-    p = tmp_path / "sample.csv"
+    assert _format_csv_value(12578297.451346, decimal_sep=".") == "12578297.451346"
+    assert _format_csv_value(-6.5, decimal_sep=".") == "-6.5"
+    assert _format_csv_value(0.0, decimal_sep=".") == "0.0"
+
+
+def test_write_csv_rows_sunrise_defaults(tmp_path: Path) -> None:
+    """Sunrise output: ``;`` field separator, ``,`` decimal (Excel-IT)."""
+    p = tmp_path / "sunrise.csv"
     _write_csv_rows(p, [("A", "B"), (1.5, -2.75)])
+    raw = p.read_text(encoding="utf-8-sig")
+    assert "1,5" in raw
+    assert "-2,75" in raw
+    # Field separator is ';' — no stray commas outside decimal notation
+    assert ";" in raw
+
+
+def test_write_csv_rows_astra_format(tmp_path: Path) -> None:
+    """Astra output: ``,`` field separator, ``.`` decimal (US convention)."""
+    p = tmp_path / "astra.csv"
+    _write_csv_rows(
+        p, [("A", "B"), (1.5, -2.75)], field_sep=",", decimal_sep=".",
+    )
     raw = p.read_text(encoding="utf-8-sig")
     assert "1.5" in raw
     assert "-2.75" in raw
-    assert "," not in raw  # no decimal comma anywhere in a purely-numeric row
+    assert "A,B" in raw
+    # No semicolons in the Astra format
+    assert ";" not in raw
 
 
 def _build_ceded_fixture(path: Path) -> None:
@@ -578,7 +616,7 @@ def test_create_empty_csv(tmp_path: Path) -> None:
         "columns": [],
     }
     assert output.exists()
-    assert _read_csv(output) == []
+    assert _read_astra_csv(output) == []
 
 
 def _build_ceded_with_year_fixture(path: Path, rows_data: list[tuple]) -> None:
@@ -639,7 +677,7 @@ def test_create_new_business_ppos(tmp_path: Path) -> None:
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CROSS_SUB_FASSCHNG", 0),
@@ -654,7 +692,7 @@ def test_create_new_business_ppos_empty_pairs(tmp_path: Path) -> None:
     result = create_new_business_ppos(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]
 
 
@@ -671,7 +709,7 @@ def test_create_coverage_unit(tmp_path: Path) -> None:
         "columns": expected_columns,
     }
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows[0] == ("GOC_ID", "PROJECTION_PERIOD") + tuple(range(1, 101))
     assert rows[1] == ("IT05PABPPLE2024", 1) + (0,) * 100
     assert rows[2] == ("IT06ABCDE2024", 1) + (0,) * 100
@@ -694,7 +732,7 @@ def test_create_reinsurance(tmp_path: Path) -> None:
         "columns": ["GOC_ID", "VARIABLE_NAME", "1", "T"],
     }
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1, "T"),
         ("IT05PABPPLE2024", "LOSSRECO_IFE_ALLOCATION", 0, 2024),
@@ -712,7 +750,7 @@ def test_create_reinsurance_empty_pairs(tmp_path: Path) -> None:
     result = create_reinsurance(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1, "T")]
 
 
@@ -733,7 +771,7 @@ def test_create_mandatory_actuals(tmp_path: Path) -> None:
         "columns": ["GOC_ID", "VARIABLE_NAME", "1"],
     }
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows[0] == ("GOC_ID", "VARIABLE_NAME", 1)
     assert len(rows) == 1 + 3 * 16
 
@@ -759,7 +797,7 @@ def test_create_mandatory_actuals_empty_pairs(tmp_path: Path) -> None:
     result = create_mandatory_actuals(pairs=[], output_path=str(output))
 
     assert result["rows"] == 0
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [("GOC_ID", "VARIABLE_NAME", 1)]
 
 
@@ -814,7 +852,7 @@ def test_update_projection_parameters_entity_h2_2025(tmp_path: Path) -> None:
         "FX_REPORTING_DATE",
     }
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     by_param = {row[0]: row[1] for row in rows[1:]}
     # Edits applied
     assert by_param["CF_TIMESTEP"] == "SEMESTRIAL"
@@ -846,7 +884,7 @@ def test_update_projection_parameters_entity_h1_2025(tmp_path: Path) -> None:
         semester=1,
     )
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     by_param = {row[0]: row[1] for row in rows[1:]}
     assert by_param["REPORTING_MONTH"] == "6_JUNE"
     assert by_param["FX_AVERAGE_DATE"] == "Q125"
@@ -875,7 +913,7 @@ def test_update_projection_parameters_entity_drops_extra_columns(tmp_path: Path)
         semester=2,
     )
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert all(len(r) == 2 for r in rows)
     assert rows[0] == ("PARAMETER", "VALUE")
     assert rows[1] == ("CF_TIMESTEP", "SEMESTRIAL")
@@ -923,7 +961,7 @@ def test_update_mp_goc_seg_rewrites_only_perimeter_rows(tmp_path: Path) -> None:
 
     assert result == {"output_path": str(output), "rows_in_perimeter": 2}
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [
         ("GOC_SEG_ID", "GOC_ID", "SEG_ID", "ALLOCATION_RATIO"),
         ("IT05PABPPLE2025_02_P&C", "IT05PABPPLE2025", "02_P&C", 1),
@@ -949,7 +987,7 @@ def test_update_mp_goc_seg_empty_perimeter_changes_nothing(tmp_path: Path) -> No
     )
 
     assert result["rows_in_perimeter"] == 0
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows[1] == ("IT05RRIEEBB2025_02_P&C", "IT05RRIEEBB2025", "02_P&C", 1)
 
 
@@ -971,7 +1009,7 @@ def test_update_mp_goc_seg_skips_short_or_missing_goc(tmp_path: Path) -> None:
         health_perimeter_gocs=["IT05RRIEEBB", "SHORT", ""],
     )
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows[1] == ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1)
     assert rows[2] == ("X_02_P&C", "SHORT", "02_P&C", 1)
     assert rows[3] == ("Y_02_P&C", None, "02_P&C", 1)
@@ -998,7 +1036,7 @@ def test_update_mp_goc_seg_accepts_tab_separated_input(tmp_path: Path) -> None:
     )
 
     assert result["rows_in_perimeter"] == 2
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows[1] == ("IT05RRIEEBB2025_02_HLTH_PC", "IT05RRIEEBB2025", "02_HLTH_PC", 1)
     assert rows[2] == ("IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1)
     assert rows[3] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
@@ -1020,13 +1058,14 @@ def test_update_mp_goc_seg_truncates_trailing_empty_columns(tmp_path: Path) -> N
         health_perimeter_gocs=["IT05RRIEEBB"],
     )
 
-    # The raw bytes must end each line after the 4th field (no trailing ';').
+    # The raw bytes must end each line after the 4th field (no trailing sep).
+    # Astra output uses ',' as field separator.
     text = output.read_text(encoding="utf-8-sig")
     for line in text.splitlines():
-        assert line.count(";") == 3, f"expected 3 separators, got {line!r}"
+        assert line.count(",") == 3, f"expected 3 separators, got {line!r}"
 
     # And the parsed rows must still have exactly 4 cells.
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert all(len(r) == 4 for r in rows)
     assert rows[1] == ("IT05RRIEEBB2024_02_HLTH_PC", "IT05RRIEEBB2024", "02_HLTH_PC", 1)
     assert rows[2] == ("IT05PABPPLE2024_02_P&C", "IT05PABPPLE2024", "02_P&C", 1)
@@ -1075,7 +1114,7 @@ def test_append_actuarial_aom_impact_appends_and_sorts(tmp_path: Path) -> None:
         "rows_total": 7,  # 3 existing + 4 new
     }
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows[0] == ("GOC_ID", "STEP_ID", 1)
     assert rows[1:] == [
         ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
@@ -1105,7 +1144,7 @@ def test_append_actuarial_aom_impact_empty_inputs(tmp_path: Path) -> None:
     assert result["rows_appended"] == 0
     assert result["rows_total"] == 1
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [
         ("GOC_ID", "STEP_ID", 1),
         ("IT05PABPPLE2024", "PVFC_LIC_UNWIND", 0),
@@ -1135,7 +1174,7 @@ def test_append_actuarial_aom_impact_skips_blank_step_ids(tmp_path: Path) -> Non
 
     assert result["rows_appended"] == 2
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows[1:] == [
         ("G2025", "STEP_A", 1),
         ("G2025", "STEP_B", 5),
@@ -1172,7 +1211,7 @@ def test_update_curve_id_param_fills_known_variables(tmp_path: Path) -> None:
 
     assert result == {"output_path": str(output), "rows_updated": 5}
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
@@ -1204,7 +1243,7 @@ def test_update_curve_id_param_leaves_other_variables_untouched(tmp_path: Path) 
 
     assert result["rows_updated"] == 1
 
-    rows = _read_csv(output)
+    rows = _read_astra_csv(output)
     assert rows == [
         ("GOC_ID", "VARIABLE_NAME", 1),
         ("IT05PABPPLE2024", "CLOSING_CURVE_ID", "pippo"),
@@ -1249,7 +1288,7 @@ def _build_mp_goc_fixture(
 
 
 def _read_mp_goc(path: Path) -> dict[int, dict]:
-    rows = _read_csv(path)
+    rows = _read_astra_csv(path)
     out: dict[int, dict] = {}
     for r in rows[1:]:
         out[r[2]] = {"E": r[4], "F": r[5], "L": r[11], "P": r[15], "R": r[17]}
@@ -1370,7 +1409,7 @@ def test_update_mp_goc_idempotent(tmp_path: Path) -> None:
         input_path=str(out1), output_path=str(out2),
         year=2025, semester=2, business_type="Diretto",
     )
-    assert _read_csv(out1) == _read_csv(out2)
+    assert _read_astra_csv(out1) == _read_astra_csv(out2)
 
 
 def test_update_mp_goc_invalid_business_type(tmp_path: Path) -> None:
@@ -1418,7 +1457,7 @@ def test_update_mp_goc_populates_t_and_u_with_goc_name(tmp_path: Path) -> None:
         year=2024, semester=2, business_type="",
     )
 
-    out_rows = _read_csv(output)
+    out_rows = _read_astra_csv(output)
     # Real cohort year → strip the trailing "2024" off "IT05PABPPLE2024"
     assert out_rows[1][19] == "IT05PABPPLE"
     assert out_rows[1][20] == "IT05PABPPLE"

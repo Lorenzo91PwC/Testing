@@ -72,36 +72,50 @@ def _read_csv_table(path: str) -> list[list[Any]]:
         return [[(cell if cell != "" else None) for cell in row] for row in reader]
 
 
-def _format_csv_value(value: Any) -> str:
+def _format_csv_value(value: Any, decimal_sep: str = ",") -> str:
     """Convert a Python value to its CSV string form.
 
-    ``None`` -> empty string. ``float`` -> ``repr(value)`` so the
-    decimal separator stays a ``.`` (e.g. ``12578297.451346`` is
-    written as-is). ``bool`` is preserved as ``True/False``. Everything
-    else (``int``, ``str``, ...) is passed through ``str``.
+    ``None`` -> empty string. ``float`` -> ``repr(value)`` with the
+    default Python decimal point replaced by ``decimal_sep`` when it
+    differs (default ``,`` for the Sunrise / Italian-Excel convention;
+    Astra passes ``.``). ``bool`` is preserved as ``True/False``.
+    Everything else (``int``, ``str``, ...) is passed through ``str``.
     """
     if value is None:
         return ""
     if isinstance(value, bool):
         return "True" if value else "False"
     if isinstance(value, float):
-        return repr(value)
+        s = repr(value)
+        return s if decimal_sep == "." else s.replace(".", decimal_sep)
     return str(value)
 
 
-def _write_csv_rows(path: str, rows: Iterable[Iterable[Any]]) -> None:
+def _write_csv_rows(
+    path: str,
+    rows: Iterable[Iterable[Any]],
+    field_sep: str = ";",
+    decimal_sep: str = ",",
+) -> None:
     """Write rows to a CSV file (UTF-8 with BOM), creating parent dirs.
 
-    Field separator is ``;`` (keeps files opening natively in
-    Italian-locale Excel). Floats keep the ``.`` as decimal separator
-    — e.g. ``12578297.451346`` — regardless of the host locale.
-    Integers keep their plain integer form (no decimal point).
+    Defaults follow the **Sunrise** output convention: ``;`` between
+    fields, ``,`` as decimal separator — opens natively in
+    Italian-locale Excel. Astra skills pass ``field_sep=","`` and
+    ``decimal_sep="."`` for the US-format CSVs the downstream Astra
+    system expects; the module-level ``_ASTRA_CSV_KWARGS`` bundles both.
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f, delimiter=";")
+        writer = csv.writer(f, delimiter=field_sep)
         for row in rows:
-            writer.writerow([_format_csv_value(v) for v in row])
+            writer.writerow([_format_csv_value(v, decimal_sep) for v in row])
+
+
+# Astra downstream expects US-format CSVs: `,` between fields, `.` as
+# decimal separator. Bundle both flags so every Astra skill can pass
+# `**_ASTRA_CSV_KWARGS` without repeating itself.
+_ASTRA_CSV_KWARGS = {"field_sep": ",", "decimal_sep": "."}
 
 
 # ===========================================================================
@@ -1133,7 +1147,7 @@ def update_curve_id_param(
     """
     table = _read_csv_table(input_path)
     if not table:
-        _write_csv_rows(output_path, [])
+        _write_csv_rows(output_path, [], **_ASTRA_CSV_KWARGS)
         return {"output_path": output_path, "rows_updated": 0}
 
     rows_updated = 0
@@ -1157,7 +1171,7 @@ def update_curve_id_param(
                 rows_updated += 1
         out_rows.append(row)
 
-    _write_csv_rows(output_path, out_rows)
+    _write_csv_rows(output_path, out_rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows_updated": rows_updated,
@@ -1213,7 +1227,7 @@ def append_actuarial_aom_impact(
     combined = existing + new_rows
     combined.sort(key=lambda r: (str(r[0] or ""), str(r[1] or "")))
 
-    _write_csv_rows(output_path, [header, *combined])
+    _write_csv_rows(output_path, [header, *combined], **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows_appended": len(new_rows),
@@ -1240,7 +1254,7 @@ def update_mp_goc_seg(
 
     table = _read_csv_table(input_path)
     if not table:
-        _write_csv_rows(output_path, [])
+        _write_csv_rows(output_path, [], **_ASTRA_CSV_KWARGS)
         return {"output_path": output_path, "rows_in_perimeter": 0}
 
     rows_changed = 0
@@ -1277,7 +1291,7 @@ def update_mp_goc_seg(
         rows_changed += 1
         out_rows.append(row)
 
-    _write_csv_rows(output_path, out_rows)
+    _write_csv_rows(output_path, out_rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows_in_perimeter": rows_changed,
@@ -1339,7 +1353,7 @@ def update_projection_parameters_entity(
 
     table = _read_csv_table(input_path)
     if not table:
-        _write_csv_rows(output_path, [])
+        _write_csv_rows(output_path, [], **_ASTRA_CSV_KWARGS)
         return {"output_path": output_path, "parameters_updated": [], "rows_updated": 0}
 
     header = list(table[0])[:2]
@@ -1360,7 +1374,7 @@ def update_projection_parameters_entity(
                 applied.append(key)
         out_rows.append(row)
 
-    _write_csv_rows(output_path, out_rows)
+    _write_csv_rows(output_path, out_rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "parameters_updated": applied,
@@ -1374,7 +1388,7 @@ def create_empty_csv(output_path: str) -> dict[str, Any]:
     Used as a placeholder until population rules for an output file are
     defined. Overwrites the output file if it already exists.
     """
-    _write_csv_rows(output_path, [])
+    _write_csv_rows(output_path, [], **_ASTRA_CSV_KWARGS)
     return {"output_path": output_path, "rows": 0, "columns": []}
 
 
@@ -1466,7 +1480,7 @@ def update_mp_goc(
 
     table = _read_csv_table(input_path)
     if not table:
-        _write_csv_rows(output_path, [])
+        _write_csv_rows(output_path, [], **_ASTRA_CSV_KWARGS)
         return {"output_path": output_path, "rows_changed": 0}
 
     out_rows: list[list[Any]] = [list(table[0])]
@@ -1535,7 +1549,7 @@ def update_mp_goc(
         rows_changed += 1
         out_rows.append(row)
 
-    _write_csv_rows(output_path, out_rows)
+    _write_csv_rows(output_path, out_rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows_changed": rows_changed,
@@ -1570,7 +1584,7 @@ def create_new_business_ppos(
     rows: list[list[Any]] = [headers]
     for pair in pairs:
         rows.append([pair["goc_id"], "CROSS_SUB_FASSCHNG", 0])
-    _write_csv_rows(output_path, rows)
+    _write_csv_rows(output_path, rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows": len(pairs),
@@ -1598,7 +1612,7 @@ def create_coverage_unit(
     rows: list[list[Any]] = [header]
     for pair in pairs:
         rows.append([pair["goc_id"], 1, *([0] * COVERAGE_UNIT_PROJECTION_COLUMN_COUNT)])
-    _write_csv_rows(output_path, rows)
+    _write_csv_rows(output_path, rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows": len(pairs),
@@ -1656,7 +1670,7 @@ def create_reinsurance(
         for variable_name in REINSURANCE_VARIABLE_NAMES:
             for pair in goc_pairs:
                 rows.append([pair["goc_id"], variable_name, 0, pair["year"]])
-    _write_csv_rows(output_path, rows)
+    _write_csv_rows(output_path, rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows": len(pairs) * len(REINSURANCE_VARIABLE_NAMES),
@@ -1690,7 +1704,7 @@ def create_mandatory_actuals(
         for pair in goc_pairs:
             for variable_name in MANDATORY_ACTUALS_VARIABLE_NAMES:
                 rows.append([pair["goc_id"], variable_name, 0])
-    _write_csv_rows(output_path, rows)
+    _write_csv_rows(output_path, rows, **_ASTRA_CSV_KWARGS)
     return {
         "output_path": output_path,
         "rows": len(pairs) * len(MANDATORY_ACTUALS_VARIABLE_NAMES),
