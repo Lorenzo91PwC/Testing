@@ -220,31 +220,34 @@ gocs_to_exclude = [
 ]
 
 st.caption(
-    "**GOC to rename** — every occurrence of *Old name* in "
-    "the GoC list read from the inputs is replaced by *New "
-    "name* before exclusions are applied. Rename sources not "
-    "found in the input list are surfaced as a warning."
+    "**GOC to rename** — indica direttamente il binomio `GOC+coorte` "
+    "(es. `IT05PABPPLE2024`) sia in *Old* sia in *New*. Il rename opera "
+    "solo sulla specifica coppia (GoC, coorte), non su tutte le coorti "
+    "della stessa GoC. Il *New* NON può coincidere con un `GOC+coorte` "
+    "già presente negli input: in tal caso il run si ferma con errore. "
+    "Formato: nome GoC seguito dai 4 caratteri dell'anno di coorte, "
+    "senza separatori."
 )
 rename_df = st.data_editor(
-    pd.DataFrame([{"Old name": "", "New name": ""}]),
+    pd.DataFrame([{"Old GOC+cohort": "", "New GOC+cohort": ""}]),
     num_rows="dynamic",
     hide_index=True,
     column_config={
-        "Old name": st.column_config.TextColumn(
-            "Old name",
-            help="GOC name as it appears in the input files.",
+        "Old GOC+cohort": st.column_config.TextColumn(
+            "Old GOC+cohort",
+            help="GOC+coorte come compare negli input (es. `IT05PABPPLE2024`).",
         ),
-        "New name": st.column_config.TextColumn(
-            "New name",
-            help="Replacement name written to the outputs.",
+        "New GOC+cohort": st.column_config.TextColumn(
+            "New GOC+cohort",
+            help="Nuovo GOC+coorte. Non deve già esistere nei dati.",
         ),
     },
     key="sunrise_goc_renames_editor",
 )
 goc_renames: dict[str, str] = {}
 for _, row in rename_df.iterrows():
-    old = str(row.get("Old name") or "").strip()
-    new = str(row.get("New name") or "").strip()
+    old = str(row.get("Old GOC+cohort") or "").strip()
+    new = str(row.get("New GOC+cohort") or "").strip()
     if old and new:
         goc_renames[old] = new
 

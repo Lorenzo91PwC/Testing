@@ -641,42 +641,109 @@ def create_mp_model_point(
     goc_list, master = build_input_sunrise_master_table(sources)
     warnings_out: list[str] = []
 
-    # Apply renames first so the exclusion list operates on post-rename
-    # names. A rename keeps the data, it just relabels it — collisions
-    # with an existing GoC merge the two cohorts at write time.
-    renames: dict[str, str] = {}
+    # Apply per-(GoC, cohort) renames. Both the "Old" and the "New" value
+    # are `GOC+cohort` strings (e.g. `IT05PABPPLE2024`): the last 4 chars
+    # are the cohort year, the rest is the GoC name. This lets the user
+    # rename a single (GoC, cohort) pair without touching the other
+    # cohorts of the same GoC — effectively splitting a GoC row-by-row.
+    # The exclusion list still operates on the 11-char GoC name.
+
+    def _parse_goc_cohort_id(s: str) -> tuple[str, int] | None:
+        s = (s or "").strip()
+        if len(s) < 5:
+            return None
+        try:
+            year = int(s[-4:])
+        except ValueError:
+            return None
+        if not (1900 <= year <= 2100):
+            return None
+        name = s[:-4]
+        if not name:
+            return None
+        return (name, year)
+
+    renames_by_id: dict[tuple[str, int], tuple[str, int]] = {}
     for old, new in (goc_renames or {}).items():
-        old_s = (old or "").strip()
-        new_s = (new or "").strip()
-        if not old_s or not new_s:
-            continue
-        if old_s in renames:
+        old_parsed = _parse_goc_cohort_id(old)
+        new_parsed = _parse_goc_cohort_id(new)
+        if old_parsed is None or new_parsed is None:
             warnings_out.append(
-                f"Rename for GoC '{old_s}' specified more than once; "
-                f"keeping the first ('{renames[old_s]}')."
+                f"Rename entry '{old}' -> '{new}' has invalid format "
+                "(expected `<goc><YYYY>`, e.g. `IT05PABPPLE2024`). Skipped."
             )
             continue
-        renames[old_s] = new_s
-    if renames:
-        found_old = {e["GOC"] for e in master} | set(goc_list)
-        for old_s in renames:
-            if old_s not in found_old:
+        if old_parsed in renames_by_id:
+            warnings_out.append(
+                f"Rename for '{old}' specified more than once; "
+                "keeping the first."
+            )
+            continue
+        renames_by_id[old_parsed] = new_parsed
+
+    if renames_by_id:
+        existing_pairs = {(e["GOC"], int(e["ANNO"])) for e in master}
+
+        # Warning: an "Old" pair that doesn't exist in the input is a no-op.
+        for old_id in renames_by_id:
+            if old_id not in existing_pairs:
                 warnings_out.append(
-                    f"Rename source GoC '{old_s}' is not in the input "
-                    "list — nothing to rename for this entry."
+                    f"Rename source '{old_id[0]}{old_id[1]}' is not in the "
+                    "input list - nothing to rename for this entry."
                 )
+
+        # Blocking check: a "New" pair that already exists in the input
+        # (and isn't itself being renamed away) would collide.
+        old_ids = set(renames_by_id.keys())
+        collisions: list[str] = []
+        for old_id, new_id in renames_by_id.items():
+            if new_id == old_id:
+                continue  # identity rename, no-op
+            if new_id in existing_pairs and new_id not in old_ids:
+                collisions.append(f"{new_id[0]}{new_id[1]}")
+        if collisions:
+            raise ValueError(
+                "Rename target(s) already present in the input GoC+cohort "
+                f"list: {', '.join(sorted(set(collisions)))}. "
+                "Change the *New GOC+cohort* value or remove the "
+                "pre-existing input row before re-running."
+            )
+
+        # Apply the renames in place on master.
         for e in master:
-            if e["GOC"] in renames:
-                e["GOC"] = renames[e["GOC"]]
-        seen: set[str] = set()
-        renamed_goc_list: list[str] = []
-        for g in goc_list:
-            new_name = renames.get(g, g)
-            if new_name in seen:
-                continue
-            seen.add(new_name)
-            renamed_goc_list.append(new_name)
-        goc_list = renamed_goc_list
+            key = (e["GOC"], int(e["ANNO"]))
+            if key in renames_by_id:
+                new_goc, new_year = renames_by_id[key]
+                e["GOC"] = new_goc
+                e["ANNO"] = new_year
+
+        # Second collision pass: two distinct renames may target the same
+        # New id (e.g. Motor2025 -> X2025 and Property2025 -> X2025). After
+        # applying, spot any (GoC, cohort, RIF) triple that now has >1 row.
+        counts: dict[tuple[str, int, int], int] = {}
+        for e in master:
+            key3 = (e["GOC"], int(e["ANNO"]), int(e["ANNO_RIFERIMENTO"]))
+            counts[key3] = counts.get(key3, 0) + 1
+        dup_pairs = sorted(
+            {f"{k[0]}{k[1]}" for k, v in counts.items() if v > 1}
+        )
+        if dup_pairs:
+            raise ValueError(
+                "Rename created duplicate GoC+cohort entries: "
+                f"{', '.join(dup_pairs)}. Two renames cannot map to the "
+                "same *New GOC+cohort*."
+            )
+
+        # Rebuild goc_list from the updated master so any brand-new GoC
+        # name introduced by a rename shows up in MP_LoB / MP_ObservationYear.
+        seen_gocs: set[str] = set()
+        new_goc_list: list[str] = []
+        for e in master:
+            g = e["GOC"]
+            if g not in seen_gocs:
+                seen_gocs.add(g)
+                new_goc_list.append(g)
+        goc_list = new_goc_list
 
     exclude = {g.strip() for g in (gocs_to_exclude or []) if g and g.strip()}
     if exclude:

@@ -670,9 +670,10 @@ def test_run_phase1_excludes_gocs(tmp_path: Path) -> None:
     assert cohort_gocs == {"Motor", "Liability"}
 
 
-def test_run_phase1_renames_gocs(tmp_path: Path) -> None:
-    """``goc_renames`` rewrites the GoC name in every downstream output
-    (MP_LoB, cohort pairs, etc.) before exclusions are applied."""
+def test_run_phase1_renames_single_cohort(tmp_path: Path) -> None:
+    """``goc_renames`` operates on a specific ``(GoC, cohort)`` pair:
+    renaming ``Motor2025`` only moves the 2025 cohort of ``Motor`` to
+    the new name; the 2024 cohort of ``Motor`` stays put."""
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
     ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
@@ -681,7 +682,7 @@ def test_run_phase1_renames_gocs(tmp_path: Path) -> None:
     )
     ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
     _build_input_sunrise_workbook(
-        ceded_prev, ["Property", "Liability"], year=2024, sinistri=80.0, riserva=40.0,
+        ceded_prev, ["Property", "Motor"], year=2024, sinistri=80.0, riserva=40.0,
     )
     transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
     _write_csv(
@@ -701,22 +702,139 @@ def test_run_phase1_renames_gocs(tmp_path: Path) -> None:
         entities=[(6, "AAI")],
         year=2025,
         semester=2,
-        goc_renames={"Motor": "Auto"},
+        goc_renames={"Motor2025": "Auto2025"},
     )
     assert result["warnings"] == []
 
-    # MP_LoB uses the renamed GoC name.
+    # MP_LoB shows both GoCs: Motor still exists (its 2024 cohort survived),
+    # Auto exists as the new home of the 2025 cohort of what was Motor.
     mp_lob_rows = _read_csv(result["outputs"][1])
     gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
-    assert "Motor" not in gocs_in_lob
+    assert "Motor" in gocs_in_lob
     assert "Auto" in gocs_in_lob
 
-    # Cohort pairs handed to Astra also carry the new name.
-    cohort_gocs = {p["goc"] for p in result["goc_cohort_pairs"]}
-    assert "Motor" not in cohort_gocs
-    assert "Auto" in cohort_gocs
-    auto_ids = {p["goc_id"] for p in result["goc_cohort_pairs"] if p["goc"] == "Auto"}
-    assert "Auto2025" in auto_ids
+    # Cohort pairs handed to Astra reflect the split:
+    # - Motor keeps its real 2024 row
+    # - Auto owns the real 2025 row (moved from Motor2025)
+    # Both GoCs also get zero auto-fill rows for the analysis year and the
+    # previous year respectively; the important check is that the real
+    # values are on the right sides.
+    pairs = {(p["goc"], p["year"]) for p in result["goc_cohort_pairs"]}
+    assert ("Motor", 2024) in pairs
+    assert ("Auto", 2025) in pairs
+
+    # MP_ModelPoint tells us which side actually carries the real numbers.
+    mp_rows = _read_csv(result["outputs"][0])
+    motor_2024 = [r for r in mp_rows[1:] if r[1] == "Motor2024" and r[2] == "Motor@Opening"]
+    assert len(motor_2024) == 1 and motor_2024[0][9] == -80.0  # real Motor 2024 sinistri
+    auto_2025 = [r for r in mp_rows[1:] if r[1] == "Auto2025" and r[2] == "Auto@Closing"]
+    assert len(auto_2025) == 1 and auto_2025[0][9] == -100.0  # renamed from Motor2025
+
+
+def test_run_phase1_renames_all_cohorts(tmp_path: Path) -> None:
+    """Renaming both cohorts of a GoC yields the equivalent of the
+    old per-GoC rename semantics — the original GoC name disappears."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("Motor", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+        goc_renames={"Motor2024": "Auto2024", "Motor2025": "Auto2025"},
+    )
+    assert result["warnings"] == []
+
+    mp_lob_rows = _read_csv(result["outputs"][1])
+    gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
+    assert gocs_in_lob == {"Auto"}
+
+
+def test_run_phase1_rename_collision_raises(tmp_path: Path) -> None:
+    """If the target GoC+cohort already exists in the input, the run
+    stops with a clear ValueError before writing any output."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor", "Property"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Property", "Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("Motor", "A", "B"),
+         ("Property", "C", "D")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    with pytest.raises(ValueError, match="already present"):
+        run_phase1(
+            input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+            run_dir=tmp_path,
+            entities=[(6, "AAI")],
+            year=2025,
+            semester=2,
+            goc_renames={"Motor2025": "Property2025"},
+        )
+
+
+def test_run_phase1_rename_invalid_format_warning(tmp_path: Path) -> None:
+    """A rename entry that doesn't parse as `<goc><YYYY>` is skipped
+    with a warning; the pipeline still completes."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    ceded_curr = inputs_dir / "1.1_2025.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_curr, ["Motor"], year=2025, sinistri=100.0, riserva=50.0,
+    )
+    ceded_prev = inputs_dir / "1.2_2024.12.31_AAI_Ceded.xlsx"
+    _build_input_sunrise_workbook(
+        ceded_prev, ["Motor"], year=2024, sinistri=80.0, riserva=40.0,
+    )
+    transcodifica = inputs_dir / "1.3_Transcodifica_aggregazione_GOC_H_NH.csv"
+    _write_csv(
+        transcodifica,
+        [("GOC", "Aggregation1", "Aggregation2"), ("Motor", "A", "B")],
+    )
+    payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns_fixture(payments)
+
+    result = run_phase1(
+        input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
+        run_dir=tmp_path,
+        entities=[(6, "AAI")],
+        year=2025,
+        semester=2,
+        # No trailing year -> unparseable -> skipped with a warning.
+        goc_renames={"Motor": "Auto"},
+    )
+    assert any("invalid format" in w for w in result["warnings"])
+    # Motor rows untouched: rename was silently skipped.
+    mp_lob_rows = _read_csv(result["outputs"][1])
+    gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
+    assert gocs_in_lob == {"Motor"}
 
 
 def test_run_phase1_rename_then_exclude(tmp_path: Path) -> None:
@@ -745,17 +863,18 @@ def test_run_phase1_rename_then_exclude(tmp_path: Path) -> None:
     payments = inputs_dir / "1.4_2025.12.31_Payment_Patterns_&_Risk_Adjustments.xlsx"
     _build_payment_patterns_fixture(payments)
 
+    # Rename both cohorts of Motor into Auto, then exclude Auto entirely.
     result = run_phase1(
         input_paths=[ceded_curr, ceded_prev, transcodifica, payments],
         run_dir=tmp_path,
         entities=[(6, "AAI")],
         year=2025,
         semester=2,
-        goc_renames={"Motor": "Auto"},
-        gocs_to_exclude=["Auto"],  # post-rename name
+        goc_renames={"Motor2024": "Auto2024", "Motor2025": "Auto2025"},
+        gocs_to_exclude=["Auto"],  # post-rename name (11-char GoC)
     )
 
-    # Auto (formerly Motor) is excluded; only Property survives.
+    # Auto (formerly Motor's two cohorts) is excluded; only Property survives.
     mp_lob_rows = _read_csv(result["outputs"][1])
     gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
     assert gocs_in_lob == {"Property"}
@@ -1287,11 +1406,15 @@ def test_run_phase1_rename_unknown_old_warning(tmp_path: Path) -> None:
         entities=[(6, "AAI")],
         year=2025,
         semester=2,
-        goc_renames={"Ghost": "Phantom"},
+        # Well-formed rename entry that doesn't match anything in the input.
+        goc_renames={"Ghost1900": "Phantom1900"},
     )
 
     assert result["warnings"] != []
-    assert any("Ghost" in w and "not in the input list" in w for w in result["warnings"])
+    assert any(
+        "Ghost1900" in w and "not in the input list" in w
+        for w in result["warnings"]
+    )
     # Real GoCs untouched.
     mp_lob_rows = _read_csv(result["outputs"][1])
     gocs_in_lob = {row[0] for row in mp_lob_rows[1:]}
