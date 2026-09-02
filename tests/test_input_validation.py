@@ -140,7 +140,11 @@ def test_validate_ceded_assumed_invalid_anno(tmp_path: Path) -> None:
     assert any(i.code == "INVALID_ANNO" for i in issues)
 
 
-def test_validate_ceded_assumed_all_zero_warning(tmp_path: Path) -> None:
+def test_validate_ceded_assumed_all_zero_warning_lists_gocs(tmp_path: Path) -> None:
+    """A GoC whose SINISTRI + RISERVA are zero on every row surfaces as a
+    warning that names the GoC. Multiple all-zero GoCs are listed in the
+    order they first appear in the file.
+    """
     path = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
     _build_ceded_workbook(
         path, [
@@ -149,10 +153,54 @@ def test_validate_ceded_assumed_all_zero_warning(tmp_path: Path) -> None:
         ],
     )
     issues = validate_ceded_assumed_file(path)
-    assert any(
-        i.code == "ALL_ZERO_VALUES" and i.severity == "warning"
-        for i in issues
+    warnings = [
+        i for i in issues
+        if i.code == "ALL_ZERO_VALUES" and i.severity == "warning"
+    ]
+    assert len(warnings) == 1
+    msg = warnings[0].message
+    assert "IT05PABPPLE" in msg
+    assert "IT06ABCDE" in msg
+
+
+def test_validate_ceded_assumed_all_zero_warning_only_lists_zero_gocs(
+    tmp_path: Path,
+) -> None:
+    """When some GoCs are all-zero and others have real values, the warning
+    surfaces and names *only* the all-zero ones — not the healthy ones.
+    """
+    path = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
+    _build_ceded_workbook(
+        path, [
+            ("IT_KEEP", 2024, "Direct", 100.0, 50.0),
+            ("IT_DROP", 2024, "Direct", 0.0, 0.0),
+            ("IT_DROP", 2023, "Direct", 0.0, 0.0),
+            ("IT_KEEP", 2023, "Direct", 0.0, 0.0),  # keeps: has a non-zero elsewhere
+        ],
     )
+    issues = validate_ceded_assumed_file(path)
+    warnings = [i for i in issues if i.code == "ALL_ZERO_VALUES"]
+    assert len(warnings) == 1
+    msg = warnings[0].message
+    assert "IT_DROP" in msg
+    assert "IT_KEEP" not in msg
+
+
+def test_validate_ceded_assumed_no_all_zero_warning_when_all_healthy(
+    tmp_path: Path,
+) -> None:
+    """No warning when every GoC has at least one non-zero SINISTRI or
+    RISERVA_SINISTRI value.
+    """
+    path = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
+    _build_ceded_workbook(
+        path, [
+            ("IT05PABPPLE", 2024, "Direct", 100.0, 50.0),
+            ("IT06ABCDE", 2024, "Direct", 0.0, 25.0),
+        ],
+    )
+    issues = validate_ceded_assumed_file(path)
+    assert not any(i.code == "ALL_ZERO_VALUES" for i in issues)
 
 
 def test_validate_transcodifica_ok(tmp_path: Path) -> None:

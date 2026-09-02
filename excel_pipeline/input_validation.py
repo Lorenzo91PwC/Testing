@@ -214,9 +214,16 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
             iss = _header_issue(fname, actual, expected, i)
             if iss:
                 issues.append(iss)
-        # L2: type sanity on first N data rows
+        # L2: type sanity on first N data rows, and per-GoC all-zero
+        # detection. A GoC whose SINISTRI and RISERVA_SINISTRI are zero
+        # (or empty) on every row of the sample surfaces here as a
+        # warning so the user knows it will be excluded from MP_ModelPoint
+        # (see excel_pipeline.skill.create_mp_model_point).
         n_rows = 0
-        non_zero_seen = False
+        # Per-GoC state: track first-seen order so the warning message is
+        # deterministic, and whether we've seen any non-zero value for it.
+        goc_order: list[str] = []
+        goc_nonzero: dict[str, bool] = {}
         row_idx = 1  # header is row 1
         for row in rows_iter:
             row_idx += 1
@@ -229,6 +236,10 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
             if goc is None or str(goc).strip() == "":
                 continue
             n_rows += 1
+            goc_str = str(goc).strip()
+            if goc_str not in goc_nonzero:
+                goc_order.append(goc_str)
+                goc_nonzero[goc_str] = False
             try:
                 int(anno)
             except (TypeError, ValueError):
@@ -243,7 +254,7 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
                     continue
                 try:
                     if float(cell) != 0.0:
-                        non_zero_seen = True
+                        goc_nonzero[goc_str] = True
                 except (TypeError, ValueError):
                     issues.append(ValidationIssue(
                         file=fname, severity="error",
@@ -251,13 +262,15 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
                         code="INVALID_NUMERIC",
                         message=f"{name} value {cell!r} is not numeric.",
                     ))
-        if n_rows > 0 and not non_zero_seen:
+        all_zero_gocs = [g for g in goc_order if not goc_nonzero.get(g, False)]
+        if all_zero_gocs:
             issues.append(ValidationIssue(
                 file=fname, severity="warning", location="data",
                 code="ALL_ZERO_VALUES",
                 message=(
-                    "Sample rows have SINISTRI and RISERVA_SINISTRI all zero. "
-                    "No GoC from this file will appear in MP_ModelPoint."
+                    "GoC with SINISTRI and RISERVA_SINISTRI all zero on "
+                    "every row (excluded from MP_ModelPoint): "
+                    f"{', '.join(all_zero_gocs)}."
                 ),
             ))
     finally:
