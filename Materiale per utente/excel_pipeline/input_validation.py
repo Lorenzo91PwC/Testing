@@ -214,16 +214,14 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
             iss = _header_issue(fname, actual, expected, i)
             if iss:
                 issues.append(iss)
-        # L2: type sanity on first N data rows, and per-GoC all-zero
-        # detection. A GoC whose SINISTRI and RISERVA_SINISTRI are zero
-        # (or empty) on every row of the sample surfaces here as a
-        # warning so the user knows it will be excluded from MP_ModelPoint
-        # (see excel_pipeline.skill.create_mp_model_point).
+        # L2: type sanity on first N data rows. Per-GoC "sum == 0"
+        # detection is done separately, cross-file, by
+        # ``detect_all_zero_gocs`` (called from ``validate_sunrise_inputs``)
+        # so a GoC that is zero in this file but non-zero in another
+        # doesn't get flagged, and so the sample-row limit here doesn't
+        # cause false positives on files whose non-zero rows sit past
+        # the sample.
         n_rows = 0
-        # Per-GoC state: track first-seen order so the warning message is
-        # deterministic, and whether we've seen any non-zero value for it.
-        goc_order: list[str] = []
-        goc_nonzero: dict[str, bool] = {}
         row_idx = 1  # header is row 1
         for row in rows_iter:
             row_idx += 1
@@ -236,10 +234,6 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
             if goc is None or str(goc).strip() == "":
                 continue
             n_rows += 1
-            goc_str = str(goc).strip()
-            if goc_str not in goc_nonzero:
-                goc_order.append(goc_str)
-                goc_nonzero[goc_str] = False
             try:
                 int(anno)
             except (TypeError, ValueError):
@@ -253,8 +247,7 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
                 if cell is None or cell == "":
                     continue
                 try:
-                    if float(cell) != 0.0:
-                        goc_nonzero[goc_str] = True
+                    float(cell)
                 except (TypeError, ValueError):
                     issues.append(ValidationIssue(
                         file=fname, severity="error",
@@ -262,20 +255,67 @@ def validate_ceded_assumed_file(path: Path) -> list[ValidationIssue]:
                         code="INVALID_NUMERIC",
                         message=f"{name} value {cell!r} is not numeric.",
                     ))
-        all_zero_gocs = [g for g in goc_order if not goc_nonzero.get(g, False)]
-        if all_zero_gocs:
-            issues.append(ValidationIssue(
-                file=fname, severity="warning", location="data",
-                code="ALL_ZERO_VALUES",
-                message=(
-                    "GoC with SINISTRI and RISERVA_SINISTRI all zero on "
-                    "every row (excluded from MP_ModelPoint): "
-                    f"{', '.join(all_zero_gocs)}."
-                ),
-            ))
     finally:
         wb.close()
     return issues
+
+
+def detect_all_zero_gocs(input_paths: list[Path]) -> list[str]:
+    """Cross-file scan: for every GoC seen in the ``_Ceded`` / ``_Assumed``
+    input sheets, sum SINISTRI (column D) and RISERVA_SINISTRI (column E)
+    across every row of every file, and return the list of GoCs whose
+    total is exactly zero. Order matches the first-seen order across the
+    inputs.
+
+    This is the "all zero" rule surfaced by ``ALL_ZERO_VALUES``. It runs
+    without the per-file sample limit — every row of every file is
+    considered — so a GoC that is zero in one file but non-zero in another
+    is NOT flagged, and a GoC whose non-zero rows sit past a per-file
+    sample cap is NOT flagged either. Non-numeric cells are treated as
+    zero for the purpose of this check (per-file ``INVALID_NUMERIC``
+    errors already surface separately).
+    """
+    goc_order: list[str] = []
+    goc_totals: dict[str, float] = {}
+    for path in input_paths:
+        name = path.name
+        if not (
+            path.stem.endswith(SUNRISE_CEDED_SUFFIX)
+            or path.stem.endswith(SUNRISE_ASSUMED_SUFFIX)
+        ):
+            continue
+        try:
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        except Exception:
+            continue
+        try:
+            if "Input_Sunrise" not in wb.sheetnames:
+                continue
+            ws = wb["Input_Sunrise"]
+            rows_iter = ws.iter_rows(values_only=True)
+            next(rows_iter, None)  # skip header
+            for row in rows_iter:
+                goc = row[0] if len(row) > 0 else None
+                sin = row[3] if len(row) > 3 else None
+                ris = row[4] if len(row) > 4 else None
+                if goc is None or str(goc).strip() == "":
+                    continue
+                goc_str = str(goc).strip()
+                if goc_str not in goc_totals:
+                    goc_order.append(goc_str)
+                    goc_totals[goc_str] = 0.0
+                for cell in (sin, ris):
+                    if cell is None or cell == "":
+                        continue
+                    try:
+                        goc_totals[goc_str] += float(cell)
+                    except (TypeError, ValueError):
+                        # Non-numeric cell — surface as INVALID_NUMERIC
+                        # in the per-file validator, ignore here.
+                        pass
+        finally:
+            wb.close()
+    return [g for g in goc_order if goc_totals.get(g, 0.0) == 0.0]
 
 
 TRANSCODIFICA_HEADERS = ("GOC_ID", "Aggregation1", "Aggregation2", "H-NH")
@@ -799,6 +839,22 @@ def validate_sunrise_inputs(
         report.extend(validate_transcodifica_file(f))
     for f in payment_files:
         report.extend(validate_payment_patterns_file(f, sheet_suffix))
+
+    # Cross-file: GoCs whose SINISTRI + RISERVA_SINISTRI totals are exactly
+    # zero across every row of every _Ceded/_Assumed input. These GoCs will
+    # be silently dropped by ``create_mp_model_point`` — surface them here
+    # so the user knows which ones are excluded.
+    zero_gocs = detect_all_zero_gocs(ceded_files + assumed_files)
+    if zero_gocs:
+        report.add(ValidationIssue(
+            file="(all inputs)", severity="warning", location="data",
+            code="ALL_ZERO_VALUES",
+            message=(
+                "GoC with SINISTRI + RISERVA_SINISTRI totals equal to zero "
+                "across every input row (excluded from MP_ModelPoint): "
+                f"{', '.join(zero_gocs)}."
+            ),
+        ))
 
     return report
 

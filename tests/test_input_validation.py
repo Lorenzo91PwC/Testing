@@ -10,6 +10,7 @@ import openpyxl
 from excel_pipeline.input_validation import (
     ValidationIssue,
     ValidationReport,
+    detect_all_zero_gocs,
     validate_actuarial_aom_impact_file,
     validate_astra_inputs,
     validate_ceded_assumed_file,
@@ -140,10 +141,11 @@ def test_validate_ceded_assumed_invalid_anno(tmp_path: Path) -> None:
     assert any(i.code == "INVALID_ANNO" for i in issues)
 
 
-def test_validate_ceded_assumed_all_zero_warning_lists_gocs(tmp_path: Path) -> None:
-    """A GoC whose SINISTRI + RISERVA are zero on every row surfaces as a
-    warning that names the GoC. Multiple all-zero GoCs are listed in the
-    order they first appear in the file.
+def test_validate_ceded_assumed_no_longer_emits_all_zero_at_file_level(
+    tmp_path: Path,
+) -> None:
+    """The per-file validator no longer emits ALL_ZERO_VALUES — that check
+    moved to a cross-file sum-based pass in ``detect_all_zero_gocs``.
     """
     path = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
     _build_ceded_workbook(
@@ -153,54 +155,122 @@ def test_validate_ceded_assumed_all_zero_warning_lists_gocs(tmp_path: Path) -> N
         ],
     )
     issues = validate_ceded_assumed_file(path)
-    warnings = [
-        i for i in issues
-        if i.code == "ALL_ZERO_VALUES" and i.severity == "warning"
-    ]
-    assert len(warnings) == 1
-    msg = warnings[0].message
-    assert "IT05PABPPLE" in msg
-    assert "IT06ABCDE" in msg
+    assert not any(i.code == "ALL_ZERO_VALUES" for i in issues)
 
 
-def test_validate_ceded_assumed_all_zero_warning_only_lists_zero_gocs(
+def test_detect_all_zero_gocs_flags_only_gocs_with_zero_total(
     tmp_path: Path,
 ) -> None:
-    """When some GoCs are all-zero and others have real values, the warning
-    surfaces and names *only* the all-zero ones — not the healthy ones.
+    """Sum SINISTRI + RISERVA_SINISTRI per GoC across every row of every
+    file. Flag only GoCs whose total is exactly zero.
     """
     path = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
     _build_ceded_workbook(
         path, [
-            ("IT_KEEP", 2024, "Direct", 100.0, 50.0),
+            ("IT_KEEP", 2024, "Direct", 100.0, 50.0),   # sum > 0
             ("IT_DROP", 2024, "Direct", 0.0, 0.0),
             ("IT_DROP", 2023, "Direct", 0.0, 0.0),
-            ("IT_KEEP", 2023, "Direct", 0.0, 0.0),  # keeps: has a non-zero elsewhere
+            ("IT_KEEP", 2023, "Direct", 0.0, 0.0),      # kept: total > 0
+            ("IT_TINY", 2024, "Direct", 0.0, 1.0),       # sum > 0
         ],
     )
-    issues = validate_ceded_assumed_file(path)
-    warnings = [i for i in issues if i.code == "ALL_ZERO_VALUES"]
-    assert len(warnings) == 1
-    msg = warnings[0].message
-    assert "IT_DROP" in msg
-    assert "IT_KEEP" not in msg
+    result = detect_all_zero_gocs([path])
+    assert result == ["IT_DROP"]
 
 
-def test_validate_ceded_assumed_no_all_zero_warning_when_all_healthy(
+def test_detect_all_zero_gocs_treats_cancelling_values_as_all_zero(
     tmp_path: Path,
 ) -> None:
-    """No warning when every GoC has at least one non-zero SINISTRI or
-    RISERVA_SINISTRI value.
+    """The check is sum-based: SINISTRI and RISERVA cancelling to a net
+    zero flags the GoC. This mirrors the actuarial semantics the user
+    asked for — a GoC whose column D+E totals are zero contributes
+    nothing to MP_ModelPoint.
     """
     path = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
     _build_ceded_workbook(
         path, [
-            ("IT05PABPPLE", 2024, "Direct", 100.0, 50.0),
-            ("IT06ABCDE", 2024, "Direct", 0.0, 25.0),
+            ("IT_NET_ZERO", 2024, "Direct", 100.0, -100.0),
+            ("IT_NET_ZERO", 2023, "Direct", 50.0, -50.0),
         ],
     )
-    issues = validate_ceded_assumed_file(path)
-    assert not any(i.code == "ALL_ZERO_VALUES" for i in issues)
+    result = detect_all_zero_gocs([path])
+    assert result == ["IT_NET_ZERO"]
+
+
+def test_detect_all_zero_gocs_is_cross_file(tmp_path: Path) -> None:
+    """A GoC that is zero in one file but non-zero in another is NOT
+    flagged — the sum is over every row of every input.
+    """
+    p_ceded = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
+    p_assumed = tmp_path / "2025.12.31_AAI_Assumed.xlsx"
+    _build_ceded_workbook(
+        p_ceded, [
+            ("IT_KEEP", 2024, "Direct", 0.0, 0.0),  # zero here
+            ("IT_DROP", 2024, "Direct", 0.0, 0.0),
+        ],
+    )
+    _build_ceded_workbook(
+        p_assumed, [
+            ("IT_KEEP", 2024, "Assumed", 100.0, 50.0),  # non-zero elsewhere
+            ("IT_DROP", 2024, "Assumed", 0.0, 0.0),
+        ],
+    )
+    result = detect_all_zero_gocs([p_ceded, p_assumed])
+    assert result == ["IT_DROP"]
+
+
+def test_detect_all_zero_gocs_scans_full_file_not_only_sample(
+    tmp_path: Path,
+) -> None:
+    """The scan has no per-file row limit. A GoC whose non-zero rows sit
+    well past the type-check sample cap (200) is still detected as
+    non-zero and NOT flagged.
+    """
+    path = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
+    rows = []
+    # 500 all-zero rows for a healthy GoC ...
+    for i in range(500):
+        rows.append(("IT_HEALTHY", 2024 - (i % 20), "Direct", 0.0, 0.0))
+    # ... followed by a single non-zero row far past the sample.
+    rows.append(("IT_HEALTHY", 2024, "Direct", 1.0, 0.0))
+    _build_ceded_workbook(path, rows)
+    result = detect_all_zero_gocs([path])
+    assert result == []
+
+
+def test_validate_sunrise_inputs_surfaces_cross_file_zero_gocs(
+    tmp_path: Path,
+) -> None:
+    """``validate_sunrise_inputs`` runs the cross-file sum pass and emits
+    a single ALL_ZERO_VALUES warning naming the offending GoCs.
+    """
+    ceded_curr = tmp_path / "2025.12.31_AAI_Ceded.xlsx"
+    ceded_prev = tmp_path / "2024.12.31_AAI_Ceded.xlsx"
+    _build_ceded_workbook(
+        ceded_curr, [
+            ("IT_KEEP", 2024, "Direct", 100.0, 0.0),
+            ("IT_DROP", 2024, "Direct", 0.0, 0.0),
+        ],
+    )
+    _build_ceded_workbook(
+        ceded_prev, [
+            ("IT_KEEP", 2023, "Direct", 0.0, 0.0),
+            ("IT_DROP", 2023, "Direct", 0.0, 0.0),
+        ],
+    )
+    transcodifica = tmp_path / "Transcodifica_aggregazione_GOC_H_NH.csv"
+    _build_transcodifica_csv(transcodifica, [("IT_KEEP", "A", "B", "H")])
+    pp = tmp_path / "Payment_Patterns_&_Risk_Adjustments.xlsx"
+    _build_payment_patterns(pp)
+
+    report = validate_sunrise_inputs(
+        [ceded_curr, ceded_prev, transcodifica, pp], year=2025, semester=2,
+    )
+    zero_warnings = [w for w in report.warnings if w.code == "ALL_ZERO_VALUES"]
+    assert len(zero_warnings) == 1
+    msg = zero_warnings[0].message
+    assert "IT_DROP" in msg
+    assert "IT_KEEP" not in msg
 
 
 def test_validate_transcodifica_ok(tmp_path: Path) -> None:
